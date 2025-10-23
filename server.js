@@ -21,6 +21,7 @@ import chatroomRoutes from "./routes/chatrooms.js";
 import reviewsRoutes from "./routes/reviews.js";
 import achievementsRoutes from "./routes/achievements.js";
 import profileRoutes from "./routes/profile.js";
+import draftsRoutes from "./routes/drafts.js";
 
 dotenv.config();
 
@@ -61,6 +62,7 @@ app.use("/api/chatrooms", chatroomRoutes);
 app.use("/api/reviews", reviewsRoutes);
 app.use("/api/achievements", achievementsRoutes);
 app.use("/api/profile", profileRoutes);
+app.use("/api/drafts", draftsRoutes);
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 app.get("/", (req, res) => {
