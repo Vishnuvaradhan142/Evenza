@@ -25,6 +25,7 @@ router.get("/", async (req, res) => {
         e.end_time,
         e.latitude,
         e.longitude,
+        e.image_path,
         COALESCE(c.name, 'General') AS category,
         e.created_by
       FROM events e
