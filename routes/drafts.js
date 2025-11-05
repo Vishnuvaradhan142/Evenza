@@ -12,6 +12,10 @@ const router = express.Router();
 const draftsDir = path.join(process.cwd(), "uploads", "drafts");
 if (!fs.existsSync(draftsDir)) fs.mkdirSync(draftsDir, { recursive: true });
 
+// Separate directory for draft documents (pdf, docx, etc.)
+const draftDocsDir = path.join(process.cwd(), "uploads", "draft-documents");
+if (!fs.existsSync(draftDocsDir)) fs.mkdirSync(draftDocsDir, { recursive: true });
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, draftsDir),
   filename: (req, file, cb) => {
@@ -22,6 +26,17 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
+
+// Storage for documents
+const storageDocs = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, draftDocsDir),
+  filename: (req, file, cb) => {
+    const unique = Date.now() + "-" + Math.round(Math.random() * 1e6);
+    const ext = path.extname(file.originalname);
+    cb(null, `${unique}${ext}`);
+  },
+});
+const uploadDocs = multer({ storage: storageDocs });
 
 // Normalize and parse attachments stored in DB (handle JSON, arrays, plain strings, and Windows paths)
 function normalizeWebPath(p) {
@@ -55,6 +70,32 @@ function parseAttachments(val) {
       return [normalizeWebPath(val)];
     }
     return [];
+  } catch {
+    return [];
+  }
+}
+
+// Documents can be stored as array of strings (paths) or array of objects { path, name }
+function parseDocuments(val) {
+  try {
+    if (!val) return [];
+    let arr = val;
+    if (typeof val === "string") {
+      const s = val.trim();
+      if (s.startsWith("[") || s.startsWith("{")) {
+        try { arr = JSON.parse(s); } catch { arr = [s]; }
+      } else arr = [s];
+    }
+    if (!Array.isArray(arr)) arr = [arr];
+    return arr.map((item) => {
+      if (item && typeof item === 'object') {
+        const p = normalizeWebPath(item.path || "");
+        const name = item.name || (p ? path.basename(p) : "");
+        return p ? { path: p, name } : null;
+      }
+      const p = normalizeWebPath(String(item));
+      return p ? { path: p, name: path.basename(p) } : null;
+    }).filter(Boolean);
   } catch {
     return [];
   }
@@ -262,6 +303,7 @@ router.get("/", verifyToken, requireAdmin, async (req, res) => {
     const parsed = rows.map((r) => ({
       ...r,
       attachments: parseAttachments(r.attachments),
+      documents: parseDocuments(r.documents),
     }));
 
     res.json(parsed);
@@ -297,6 +339,7 @@ router.get("/mine", verifyToken, async (req, res) => {
     const parsed = rows.map((r) => ({
       ...r,
       attachments: parseAttachments(r.attachments),
+      documents: parseDocuments(r.documents),
     }));
     res.json(parsed);
   } catch (err) {
@@ -319,6 +362,7 @@ router.get("/:id", verifyToken, async (req, res) => {
     const out = {
       ...rows[0],
       attachments: parseAttachments(rows[0].attachments),
+      documents: parseDocuments(rows[0].documents),
     };
     res.json(out);
   } catch (err) {
@@ -344,13 +388,22 @@ router.delete("/:id", verifyToken, async (req, res) => {
       return res.status(403).json({ message: "Forbidden" });
 
     const [r2] = await db.execute(
-      `SELECT attachments FROM draft_events WHERE draft_id = ?`,
+      `SELECT attachments, documents FROM draft_events WHERE draft_id = ?`,
       [id]
     );
     if (r2[0] && r2[0].attachments) {
       const atts = parseAttachments(r2[0].attachments);
       for (const a of atts) {
         const p = path.join(process.cwd(), a.replace(/^\//, ""));
+        try {
+          if (fs.existsSync(p)) fs.unlinkSync(p);
+        } catch (e) {}
+      }
+    }
+    if (r2[0] && r2[0].documents) {
+      const docs = parseAttachments(r2[0].documents);
+      for (const d of docs) {
+        const p = path.join(process.cwd(), d.replace(/^\//, ""));
         try {
           if (fs.existsSync(p)) fs.unlinkSync(p);
         } catch (e) {}
@@ -463,7 +516,7 @@ router.put("/:id", verifyToken, upload.array("files", 10), async (req, res) => {
       `SELECT * FROM draft_events WHERE draft_id = ?`,
       [id]
     );
-    const updated = after && after[0] ? { ...after[0], attachments: parseAttachments(after[0].attachments) } : null;
+    const updated = after && after[0] ? { ...after[0], attachments: parseAttachments(after[0].attachments), documents: parseAttachments(after[0].documents) } : null;
     res.json({ message: "Draft updated", draft: updated });
   } catch (err) {
     console.error("Error updating draft:", err.stack || err);
@@ -556,3 +609,98 @@ router.put("/:id/approve", verifyToken, requireAdmin, async (req, res) => {
 });
 
 export default router;
+
+/**
+ * POST /:id/documents - upload one or more documents to a draft (owner or admin)
+ */
+router.post("/:id/documents", verifyToken, uploadDocs.array("files", 20), async (req, res) => {
+  try {
+    const id = req.params.id;
+    const [rows] = await db.execute(`SELECT submitted_by, documents FROM draft_events WHERE draft_id = ?`, [id]);
+    if (!rows[0]) return res.status(404).json({ message: "Draft not found" });
+    const owner = rows[0].submitted_by;
+    if (req.user.user_id !== owner && req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+
+    // Optional names provided alongside files
+    // names can be a string or array aligned to files; fallback: originalname
+    let names = req.body?.names;
+    if (names && !Array.isArray(names)) names = [names];
+
+    const uploaded = (req.files || []).map((f, idx) => {
+      const p = path.posix.join("/uploads/draft-documents", path.basename(f.path));
+      const nm = (Array.isArray(names) && names[idx]) ? String(names[idx]) : (f.originalname || path.basename(p));
+      return { path: p, name: nm };
+    });
+    const current = parseDocuments(rows[0].documents);
+    const next = [...current, ...uploaded];
+    await db.execute(`UPDATE draft_events SET documents = ? WHERE draft_id = ?`, [JSON.stringify(next), id]);
+    res.status(201).json({ message: "Documents uploaded", documents: next });
+  } catch (err) {
+    console.error("Error uploading documents:", err.stack || err);
+    res.status(500).json({ message: "Error uploading documents" });
+  }
+});
+
+/**
+ * DELETE /:id/documents - remove a document by path (owner or admin)
+ * Body: { path: "/uploads/draft-documents/filename.ext" }
+ */
+router.delete("/:id/documents", verifyToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const docPath = req.body?.path || req.query?.path;
+    if (!docPath) return res.status(400).json({ message: "Document path is required" });
+
+    const [rows] = await db.execute(`SELECT submitted_by, documents FROM draft_events WHERE draft_id = ?`, [id]);
+    if (!rows[0]) return res.status(404).json({ message: "Draft not found" });
+    const owner = rows[0].submitted_by;
+    if (req.user.user_id !== owner && req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+
+    const current = parseDocuments(rows[0].documents);
+    const next = current.filter((obj) => String(obj.path) !== String(docPath));
+    if (next.length === current.length) return res.status(404).json({ message: "Document not found on draft" });
+
+    // Delete file from disk
+    try {
+      const abs = path.join(process.cwd(), String(docPath).replace(/^\//, ""));
+      if (fs.existsSync(abs)) fs.unlinkSync(abs);
+    } catch (e) {}
+
+    await db.execute(`UPDATE draft_events SET documents = ? WHERE draft_id = ?`, [JSON.stringify(next), id]);
+    res.json({ message: "Document removed", documents: next });
+  } catch (err) {
+    console.error("Error deleting document:", err.stack || err);
+    res.status(500).json({ message: "Error deleting document" });
+  }
+});
+
+/**
+ * PUT /:id/documents - rename a document
+ * Body: { path: "/uploads/draft-documents/xyz", name: "New name" }
+ */
+router.put("/:id/documents", verifyToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { path: docPath, name } = req.body || {};
+    if (!docPath || typeof name !== 'string' || name.trim() === '') {
+      return res.status(400).json({ message: "path and name are required" });
+    }
+    const [rows] = await db.execute(`SELECT submitted_by, documents FROM draft_events WHERE draft_id = ?`, [id]);
+    if (!rows[0]) return res.status(404).json({ message: "Draft not found" });
+    const owner = rows[0].submitted_by;
+    if (req.user.user_id !== owner && req.user.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+
+    const current = parseDocuments(rows[0].documents);
+    let found = false;
+    const next = current.map((obj) => {
+      if (String(obj.path) === String(docPath)) { found = true; return { ...obj, name }; }
+      return obj;
+    });
+    if (!found) return res.status(404).json({ message: "Document not found on draft" });
+    await db.execute(`UPDATE draft_events SET documents = ? WHERE draft_id = ?`, [JSON.stringify(next), id]);
+    res.json({ message: "Document renamed", documents: next });
+  } catch (err) {
+    console.error("Error renaming document:", err.stack || err);
+    res.status(500).json({ message: "Error renaming document" });
+  }
+});

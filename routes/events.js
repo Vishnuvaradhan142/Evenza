@@ -6,6 +6,27 @@ import { verifyToken } from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 /**
+ * GET /mine
+ * Get events created by the authenticated user (owner)
+ */
+router.get("/mine", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const [rows] = await db.execute(
+      `SELECT e.event_id, e.title, e.start_time, e.end_time, e.location
+       FROM events e
+       WHERE e.created_by = ?
+       ORDER BY e.start_time DESC`,
+      [userId]
+    );
+    res.json(rows || []);
+  } catch (err) {
+    console.error("Error fetching owner events:", err.stack || err);
+    res.status(500).json({ message: "Error fetching owner events" });
+  }
+});
+
+/**
  * GET /
  * Get all not-completed events (end_time >= NOW()).
  * Optional query param: q (search title/description)

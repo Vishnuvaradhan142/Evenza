@@ -4,7 +4,9 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "recreate:notifications": "node ./scripts/recreate_notifications_table.js",
+    "clear:announcements": "node ./scripts/clear_announcements.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

@@ -12,6 +12,7 @@ import path from "path";
 import authRoutes from "./routes/auth.js";
 import eventRoutes from "./routes/events.js";
 import notificationsRoutes from "./routes/notifications.js";
+import announcementsRoutes, { startScheduler as startAnnouncementsScheduler } from "./routes/announcements.js";
 import ticketRoutes from "./routes/tickets.js";
 import registrationRoutes from "./routes/registrations.js";
 import savedEventsRoutes from "./routes/savedEvents.js";
@@ -49,10 +50,62 @@ try {
   console.error("DB connection failed ❌:", err.message);
 }
 
+// Ensure required schema pieces exist (idempotent)
+async function ensureSchema() {
+  try {
+    // Ensure draft_events.documents column exists
+    const [cols] = await db.query(
+      "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'draft_events' AND COLUMN_NAME = 'documents'",
+      [process.env.DB_NAME]
+    );
+    if (!Array.isArray(cols) || cols.length === 0) {
+      try {
+        await db.query("ALTER TABLE draft_events ADD COLUMN documents JSON NULL");
+        console.log("✅ Added JSON column 'documents' to draft_events");
+      } catch (e) {
+        // Fallback for MySQL versions without JSON type
+        console.warn("JSON column add failed, falling back to TEXT:", e.message);
+        await db.query("ALTER TABLE draft_events ADD COLUMN documents TEXT NULL");
+        console.log("✅ Added TEXT column 'documents' to draft_events");
+      }
+    }
+  } catch (e) {
+    console.warn("Schema check failed:", e.message);
+  }
+
+  // Ensure announcements table exists
+  try {
+    const [annCols] = await db.query(
+      "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'announcements'",
+      [process.env.DB_NAME]
+    );
+    if (!Array.isArray(annCols) || annCols.length === 0) {
+      console.log("Creating 'announcements' table...");
+      await db.query(`CREATE TABLE announcements (
+        announcement_id INT AUTO_INCREMENT PRIMARY KEY,
+        event_id INT NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        status VARCHAR(20) DEFAULT 'Draft',
+        scheduled_at DATETIME NULL,
+        created_by INT NOT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        sent_at DATETIME NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      console.log("✅ Created 'announcements' table");
+    }
+  } catch (e) {
+    console.warn("Could not ensure announcements table:", e.message);
+  }
+}
+await ensureSchema();
+
 // ----------------- Routes -----------------
 app.use("/api/auth", authRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/announcements", announcementsRoutes);
 app.use("/api/tickets", ticketRoutes);
 app.use("/api/registrations", registrationRoutes);
 app.use("/api/saved-events", savedEventsRoutes);
@@ -70,7 +123,11 @@ app.get("/", (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error("Unhandled Error:", err.stack);
+  console.error("Unhandled Error:", err.stack || err);
+  if (res.headersSent) {
+    // Delegate to default Express error handler if headers already sent
+    return next(err);
+  }
   res.status(500).json({ message: "Internal Server Error" });
 });
 
@@ -147,6 +204,27 @@ io.on("connection", (socket) => {
 });
 
 // ----------------- Start Server -----------------
+// Add a friendly error handler to avoid an uncaught exception when the port is in use
+server.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use. Another process is listening on this port.`);
+    console.error('Identify and stop the process using the port, or set a different PORT environment variable.');
+    process.exit(1);
+  }
+  console.error('Server error:', err);
+  process.exit(1);
+});
+
 server.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
+
+// Start announcements scheduler (runs every minute)
+try {
+  if (typeof startAnnouncementsScheduler === 'function') {
+    startAnnouncementsScheduler();
+    console.log('Announcements scheduler started.');
+  }
+} catch (e) {
+  console.warn('Failed to start announcements scheduler:', e.message);
+}
