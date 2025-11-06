@@ -13,13 +13,38 @@ router.get("/mine", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
     const [rows] = await db.execute(
-      `SELECT e.event_id, e.title, e.start_time, e.end_time, e.location
+      `SELECT 
+         e.event_id,
+         e.title,
+         e.start_time,
+         e.end_time,
+         COALESCE(
+           NULLIF(
+             CONCAT_WS(' -',
+               JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
+               JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
+             ), ''
+           ),
+           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
+           NULL
+         ) AS location,
+         e.image AS image_path
        FROM events e
        WHERE e.created_by = ?
        ORDER BY e.start_time DESC`,
       [userId]
     );
-    res.json(rows || []);
+    const origin = `${req.protocol}://${req.get("host")}`;
+    const normalized = (rows || []).map(r => {
+      const raw = r.image_path ? String(r.image_path) : "";
+      const webPath = raw.replace(/\\\\/g, "/").replace(/\\/g, "/");
+      const abs = webPath.startsWith("http") ? webPath : origin + (webPath.startsWith("/") ? webPath : `/${webPath}`);
+      return {
+        ...r,
+        image_path: webPath ? abs : origin + "/uploads/events/default-event.png",
+      };
+    });
+    res.json(normalized);
   } catch (err) {
     console.error("Error fetching owner events:", err.stack || err);
     res.status(500).json({ message: "Error fetching owner events" });
@@ -41,12 +66,19 @@ router.get("/", async (req, res) => {
         e.event_id,
         e.title,
         e.description,
-        e.location,
+        COALESCE(
+          NULLIF(
+            CONCAT_WS(' -',
+              JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
+              JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
+            ), ''
+          ),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
+          NULL
+        ) AS location,
         e.start_time,
         e.end_time,
-        e.latitude,
-        e.longitude,
-        e.image_path,
+        e.image AS image_path,
         COALESCE(c.name, 'General') AS category,
         e.created_by
       FROM events e
@@ -64,7 +96,17 @@ router.get("/", async (req, res) => {
     sql += ` ORDER BY e.start_time ASC`;
 
     const [rows] = await db.execute(sql, params);
-    res.json(rows);
+    const origin = `${req.protocol}://${req.get("host")}`;
+    const normalized = (rows || []).map(r => {
+      const raw = r.image_path ? String(r.image_path) : "";
+      const webPath = raw.replace(/\\\\/g, "/").replace(/\\/g, "/");
+      const abs = webPath.startsWith("http") ? webPath : origin + (webPath.startsWith("/") ? webPath : `/${webPath}`);
+      return {
+        ...r,
+        image_path: webPath ? abs : origin + "/uploads/events/default-event.png",
+      };
+    });
+    res.json(normalized);
   } catch (err) {
     console.error("Error fetching events:", err.stack || err);
     res.status(500).json({ message: "Error fetching events" });
@@ -81,7 +123,18 @@ router.get("/:id", async (req, res) => {
     const [rows] = await db.execute(
       `SELECT
          e.*,
-         COALESCE(c.name, 'General') AS category
+         COALESCE(c.name, 'General') AS category,
+         e.image AS image_path,
+         COALESCE(
+           NULLIF(
+             CONCAT_WS(' -',
+               JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
+               JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
+             ), ''
+           ),
+           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
+           NULL
+         ) AS location
        FROM events e
        LEFT JOIN categories c ON e.category_id = c.category_id
        WHERE e.event_id = ?`,
@@ -89,7 +142,14 @@ router.get("/:id", async (req, res) => {
     );
 
     if (!rows[0]) return res.status(404).json({ message: "Event not found" });
-    res.json(rows[0]);
+    const origin = `${req.protocol}://${req.get("host")}`;
+    const row = rows[0];
+    const raw = row.image_path ? String(row.image_path) : "";
+    const webPath = raw.replace(/\\\\/g, "/").replace(/\\/g, "/");
+    row.image_path = webPath
+      ? (webPath.startsWith("http") ? webPath : origin + (webPath.startsWith("/") ? webPath : `/${webPath}`))
+      : origin + "/uploads/events/default-event.png";
+    res.json(row);
   } catch (err) {
     console.error("Error fetching event:", err.stack || err);
     res.status(500).json({ message: "Server error" });

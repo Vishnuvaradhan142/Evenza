@@ -227,7 +227,8 @@ router.post("/", verifyToken, upload.array("files", 10), async (req, res) => {
           const dest = path.join(eventsDir, destName);
           try {
             fs.renameSync(src, dest);
-            newPaths.push(path.join("/uploads/events", destName));
+            // Store web URL path using POSIX separators
+            newPaths.push(path.posix.join("/uploads/events", destName));
           } catch (e) {
             console.warn("move file failed", src, e.message);
           }
@@ -235,7 +236,7 @@ router.post("/", verifyToken, upload.array("files", 10), async (req, res) => {
 
         if (newPaths.length > 0) {
           await conn.execute(
-            `UPDATE events SET image_path = ? WHERE event_id = ?`,
+            `UPDATE events SET image = ? WHERE event_id = ?`,
             [newPaths[0], newEventId]
           );
         }
@@ -581,14 +582,15 @@ router.put("/:id/approve", verifyToken, requireAdmin, async (req, res) => {
       const dest = path.join(eventsDir, destName);
       try {
         fs.renameSync(src, dest);
-        newPaths.push(path.join("/uploads/events", destName));
+        // Store web URL path using POSIX separators
+        newPaths.push(path.posix.join("/uploads/events", destName));
       } catch (e) {
         console.warn("move file failed", src, e.message);
       }
     }
 
     if (newPaths.length > 0) {
-      await conn.execute(`UPDATE events SET image_path = ? WHERE event_id = ?`, [
+      await conn.execute(`UPDATE events SET image = ? WHERE event_id = ?`, [
         newPaths[0],
         newEventId,
       ]);

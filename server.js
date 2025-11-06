@@ -118,6 +118,20 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/drafts", draftsRoutes);
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
+// Serve a default event image even if the physical file is missing
+app.get("/uploads/events/default-event.png", (req, res) => {
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+  <svg xmlns="http://www.w3.org/2000/svg" width="800" height="480">
+    <rect width="100%" height="100%" fill="#f3f4f6"/>
+    <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="28" fill="#9ca3af">
+      Event Image
+    </text>
+  </svg>`;
+  res.setHeader("Content-Type", "image/svg+xml");
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.send(svg);
+});
+
 app.get("/", (req, res) => {
   res.send("Evenza backend running ✅");
 });

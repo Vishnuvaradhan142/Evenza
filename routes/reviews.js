@@ -83,3 +83,42 @@ router.post("/", verifyToken, async (req, res) => {
 });
 
 export default router;
+ 
+// ---------------- Admin: list reviews for admin's events ----------------
+// GET /api/reviews/admin?event_id=optional
+router.get("/admin", async (req, res) => {
+  try {
+    const { event_id, owner_id } = req.query || {};
+    const adminUserId = owner_id ? Number(owner_id) : null;
+    if (!adminUserId) return res.status(400).json({ message: "owner_id query param is required" });
+
+    // Only reviews for events created by this admin/owner
+    const params = [adminUserId];
+    let sql = `
+      SELECT 
+        rr.review_id,
+        rr.user_id,
+        rr.event_id,
+        rr.rating,
+        rr.review,
+        rr.created_at,
+        e.title AS event_title,
+        COALESCE(u.username, CONCAT('User ', rr.user_id)) AS user_display_name
+      FROM ratings_reviews rr
+      JOIN events e ON e.event_id = rr.event_id
+      LEFT JOIN users u ON u.user_id = rr.user_id
+      WHERE e.created_by = ?
+    `;
+    if (event_id) {
+      sql += ` AND rr.event_id = ?`;
+      params.push(event_id);
+    }
+    sql += ` ORDER BY rr.created_at DESC`;
+
+    const [rows] = await db.query(sql, params);
+    res.json(rows || []);
+  } catch (err) {
+    console.error('GET /api/reviews/admin error:', err);
+    res.status(500).json({ message: 'Failed to fetch reviews', error: err.message });
+  }
+});
