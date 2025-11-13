@@ -240,16 +240,7 @@ router.get("/user/joined", verifyToken, async (req, res) => {
 
     const [rows] = await db.execute(
       `SELECT e.event_id, e.title, e.description,
-              COALESCE(
-                NULLIF(
-                  CONCAT_WS(' - ',
-                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
-                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
-                  ), ''
-                ),
-                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
-                NULL
-              ) AS location,
+              ${getLocationSQL()},
               e.start_time, e.end_time, 
               e.image AS image_path,
               COALESCE(c.name, 'General') AS category,
