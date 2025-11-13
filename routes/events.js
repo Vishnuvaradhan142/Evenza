@@ -145,10 +145,9 @@ router.get("/", async (req, res) => {
         e.start_time,
         e.end_time,
         e.image AS image_path,
-        COALESCE(c.name, 'General') AS category,
+        COALESCE(e.category, 'General') AS category,
         e.created_by
       FROM events e
-      LEFT JOIN categories c ON e.category_id = c.category_id
       WHERE e.end_time >= NOW()
     `;
 
@@ -197,13 +196,12 @@ router.get("/:id", async (req, res) => {
     const [rows] = await db.execute(
       `SELECT
          e.*,
-         COALESCE(c.name, 'General') AS category,
+         COALESCE(e.category, 'General') AS category,
          e.image AS image_path,
          ${getLocationSQL()},
          u.username AS creator_name,
          u.email AS creator_email
        FROM events e
-       LEFT JOIN categories c ON e.category_id = c.category_id
        LEFT JOIN users u ON e.created_by = u.user_id
        WHERE e.event_id = ?`,
       [eventId]
@@ -242,12 +240,11 @@ router.get("/user/joined", verifyToken, async (req, res) => {
               ${getLocationSQL()},
               e.start_time, e.end_time, 
               e.image AS image_path,
-              COALESCE(c.name, 'General') AS category,
+              COALESCE(e.category, 'General') AS category,
               r.registered_at AS registration_date,
               r.status AS registration_status
        FROM events e
        JOIN registrations r ON e.event_id = r.event_id
-       LEFT JOIN categories c ON e.category_id = c.category_id
        WHERE r.user_id = ?
        ORDER BY e.start_time ASC`,
       [userId]
@@ -283,12 +280,11 @@ router.get("/user/upcoming", verifyToken, async (req, res) => {
               ${getLocationSQL()},
               e.start_time, e.end_time, 
               e.image AS image_path,
-              COALESCE(c.name, 'General') AS category,
+              COALESCE(e.category, 'General') AS category,
               r.registered_at AS registration_date,
               r.status AS registration_status
        FROM events e
        JOIN registrations r ON e.event_id = r.event_id
-       LEFT JOIN categories c ON e.category_id = c.category_id
        WHERE r.user_id = ? AND e.start_time >= NOW()
        ORDER BY e.start_time ASC`,
       [userId]
