@@ -3,12 +3,21 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// Log connection details (without password) for debugging
+console.log("🔍 DB Config:", {
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT || 3306,
+  hasPassword: !!process.env.DB_PASSWORD
+});
+
 const db = await mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 3306,
+  port: parseInt(process.env.DB_PORT) || 3306,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
@@ -19,6 +28,12 @@ const db = await mysql.createPool({
   keepAliveInitialDelay: 0
 });
 
-console.log("DB connection works ✅");
+// Actually test the connection
+try {
+  await db.query("SELECT 1");
+  console.log("✅ DB connection works!");
+} catch (err) {
+  console.error("❌ DB connection failed:", err.message);
+}
 
 export default db;
