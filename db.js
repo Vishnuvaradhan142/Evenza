@@ -3,27 +3,47 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// Support both individual DB variables and DATABASE_URL
+let dbConfig;
+
+if (process.env.DATABASE_URL) {
+  // Parse DATABASE_URL if provided (format: mysql://user:pass@host:port/dbname)
+  const url = new URL(process.env.DATABASE_URL);
+  dbConfig = {
+    host: url.hostname,
+    user: url.username,
+    password: url.password,
+    database: url.pathname.slice(1), // Remove leading slash
+    port: parseInt(url.port) || 3306,
+  };
+  console.log("🔍 Using DATABASE_URL for connection");
+} else {
+  // Use individual environment variables
+  dbConfig = {
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    port: parseInt(process.env.DB_PORT) || 3306,
+  };
+  console.log("🔍 Using individual DB variables for connection");
+}
+
 // Log connection details (without password) for debugging
 console.log("🔍 DB Config:", {
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 3306,
-  hasPassword: !!process.env.DB_PASSWORD
+  host: dbConfig.host,
+  user: dbConfig.user,
+  database: dbConfig.database,
+  port: dbConfig.port,
+  hasPassword: !!dbConfig.password
 });
 
 const db = await mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: parseInt(process.env.DB_PORT) || 3306,
+  ...dbConfig,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
   connectTimeout: 60000, // 60 seconds
-  acquireTimeout: 60000,
-  timeout: 60000,
   enableKeepAlive: true,
   keepAliveInitialDelay: 0
 });
