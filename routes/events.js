@@ -165,22 +165,22 @@ router.get("/", async (req, res) => {
 
     const [rows] = await db.execute(sql, params);
     const origin = `${req.protocol}://${req.get("host")}`;
-      const normalized = (rows || []).map(r => {
-        const raw = r.image_path ? String(r.image_path) : "";
-        const webPath = raw.replace(/\\/g, "/").replace(/\\/g, "/");
-        let abs = origin + "/uploads/events/default-event.png";
-        if (webPath.startsWith("http")) {
-          abs = webPath;
-        } else if (webPath.startsWith("/uploads/")) {
-          abs = origin + webPath;
-        } else if (webPath) {
-          abs = origin + "/uploads/events/" + webPath;
-        }
-        return {
-          ...r,
-          image_path: webPath ? abs : origin + "/uploads/events/default-event.png",
-        };
-      });
+    const normalized = (rows || []).map(r => {
+      const raw = r.image_path ? String(r.image_path) : "";
+      const webPath = raw.replace(/\\/g, "/").replace(/\\/g, "/");
+      let abs = origin + "/uploads/events/default-event.png";
+      if (webPath.startsWith("http")) {
+        abs = webPath;
+      } else if (webPath.startsWith("/uploads/")) {
+        abs = origin + webPath;
+      } else if (webPath) {
+        abs = origin + "/uploads/events/" + webPath;
+      }
+      return {
+        ...r,
+        image_path: webPath ? abs : origin + "/uploads/events/default-event.png",
+      };
+    });
     res.json(normalized);
   } catch (err) {
     console.error("Error fetching events:", err.stack || err);
