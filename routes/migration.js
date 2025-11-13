@@ -262,7 +262,7 @@ router.post("/import-all-data", async (req, res) => {
       await connection.query("TRUNCATE TABLE categories CASCADE");
       for (const cat of categories) {
         await connection.query(
-          "INSERT INTO categories (category_id, category_name, description) VALUES ($1, $2, $3)",
+          "INSERT INTO categories (category_id, name, description) VALUES ($1, $2, $3)",
           [cat.category_id, cat.name || cat.category_name, cat.description || null]
         );
       }
