@@ -263,7 +263,7 @@ router.post("/import-all-data", async (req, res) => {
       for (const cat of categories) {
         await connection.query(
           "INSERT INTO categories (category_id, category_name, description) VALUES ($1, $2, $3)",
-          [cat.category_id, cat.category_name, cat.description]
+          [cat.category_id, cat.name || cat.category_name, cat.description || null]
         );
       }
       await connection.query("SELECT setval('categories_category_id_seq', (SELECT MAX(category_id) FROM categories))");
