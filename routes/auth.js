@@ -111,10 +111,10 @@ router.post("/login", async (req, res) => {
         .status(401)
         .json({ message: "Invalid username or password" });
 
-    // Mark Online
-    await db.query("UPDATE users SET status = 'Online' WHERE user_id = ?", [
-      user.user_id,
-    ]);
+    // Skip status update for PostgreSQL (column doesn't exist)
+    // await db.query("UPDATE users SET status = 'Online' WHERE user_id = ?", [
+    //   user.user_id,
+    // ]);
 
     const token = jwt.sign(
       { user_id: user.user_id, username: user.username, role: user.role },
@@ -163,11 +163,11 @@ router.post("/logout", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
 
-    // Mark Offline and update last_seen
-    await db.query(
-      "UPDATE users SET status = 'Offline', last_seen = NOW() WHERE user_id = ?",
-      [userId]
-    );
+    // Skip status update for PostgreSQL (column doesn't exist)
+    // await db.query(
+    //   "UPDATE users SET status = 'Offline', last_seen = NOW() WHERE user_id = ?",
+    //   [userId]
+    // );
 
     return res.json({ message: "Logout successful" });
   } catch (err) {
