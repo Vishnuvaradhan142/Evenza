@@ -60,46 +60,45 @@ try {
 // Ensure required schema pieces exist (idempotent)
 async function ensureSchema() {
   try {
-    // Ensure draft_events.documents column exists
+    // Ensure draft_events.documents column exists (PostgreSQL)
     const [cols] = await db.query(
-      "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'draft_events' AND COLUMN_NAME = 'documents'",
-      [process.env.DB_NAME]
+      "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'draft_events' AND column_name = 'documents'",
+      []
     );
     if (!Array.isArray(cols) || cols.length === 0) {
       try {
-        await db.query("ALTER TABLE draft_events ADD COLUMN documents JSON NULL");
-        console.log("✅ Added JSON column 'documents' to draft_events");
+        await db.query("ALTER TABLE draft_events ADD COLUMN documents JSONB NULL");
+        console.log("✅ Added JSONB column 'documents' to draft_events");
       } catch (e) {
-        // Fallback for MySQL versions without JSON type
-        console.warn("JSON column add failed, falling back to TEXT:", e.message);
-        await db.query("ALTER TABLE draft_events ADD COLUMN documents TEXT NULL");
-        console.log("✅ Added TEXT column 'documents' to draft_events");
+        console.warn("Adding JSONB column failed:", e.message);
       }
     }
   } catch (e) {
     console.warn("Schema check failed:", e.message);
   }
 
-  // Ensure announcements table exists
+  // Ensure announcements table exists (PostgreSQL)
   try {
     const [annCols] = await db.query(
-      "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'announcements'",
-      [process.env.DB_NAME]
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'announcements'",
+      []
     );
     if (!Array.isArray(annCols) || annCols.length === 0) {
-      console.log("Creating 'announcements' table...");
-      await db.query(`CREATE TABLE announcements (
-        announcement_id INT AUTO_INCREMENT PRIMARY KEY,
-        event_id INT NOT NULL,
-        title VARCHAR(255) NOT NULL,
-        message TEXT NOT NULL,
-        status VARCHAR(20) DEFAULT 'Draft',
-        scheduled_at DATETIME NULL,
-        created_by INT NOT NULL,
-        created_at DATETIME NOT NULL,
-        updated_at DATETIME NOT NULL,
-        sent_at DATETIME NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+      console.log("Creating 'announcements' table (PostgreSQL)...");
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS announcements (
+          announcement_id SERIAL PRIMARY KEY,
+          event_id INTEGER NOT NULL,
+          title VARCHAR(255) NOT NULL,
+          message TEXT NOT NULL,
+          status VARCHAR(20) DEFAULT 'Draft',
+          scheduled_at TIMESTAMPTZ NULL,
+          created_by INTEGER NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          sent_at TIMESTAMPTZ NULL
+        )
+      `);
       console.log("✅ Created 'announcements' table");
     }
   } catch (e) {

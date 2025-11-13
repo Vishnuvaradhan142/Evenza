@@ -44,6 +44,28 @@ const db = {
     const pgSql = sql.replace(/\?/g, () => `$${paramIndex++}`);
     const result = await pool.query(pgSql, params);
     return [result.rows, result.fields];
+  },
+  // Get a dedicated client for transaction-like flows, with a mysql2-ish API
+  getConnection: async () => {
+    const client = await pool.connect();
+    return {
+      beginTransaction: async () => client.query('BEGIN'),
+      commit: async () => client.query('COMMIT'),
+      rollback: async () => client.query('ROLLBACK'),
+      execute: async (sql, params) => {
+        let paramIndex = 1;
+        const pgSql = sql.replace(/\?/g, () => `$${paramIndex++}`);
+        const result = await client.query(pgSql, params);
+        return [result.rows, result.fields];
+      },
+      query: async (sql, params) => {
+        let paramIndex = 1;
+        const pgSql = sql.replace(/\?/g, () => `$${paramIndex++}`);
+        const result = await client.query(pgSql, params);
+        return [result.rows, result.fields];
+      },
+      release: () => client.release()
+    };
   }
 };
 

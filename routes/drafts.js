@@ -1,6 +1,5 @@
 import express from "express";
 import db from "../db.js";
-import mysql from "mysql2";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import multer from "multer";
 import path from "path";
