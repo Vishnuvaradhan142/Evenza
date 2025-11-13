@@ -4,6 +4,34 @@ import db from "../db.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
+const isPostgres = !!process.env.DATABASE_URL;
+
+// Helper function to get location SQL based on database type
+const getLocationSQL = () => {
+  if (isPostgres) {
+    return `COALESCE(
+      NULLIF(
+        CONCAT_WS(' - ',
+          e.locations->0->>'name',
+          e.locations->0->>'address'
+        ), ''
+      ),
+      e.locations->0::text,
+      NULL
+    ) AS location`;
+  } else {
+    return `COALESCE(
+      NULLIF(
+        CONCAT_WS(' - ',
+          JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
+          JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
+        ), ''
+      ),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
+      NULL
+    ) AS location`;
+  }
+};
 
 /**
  * Get all saved events of logged-in user
@@ -14,16 +42,7 @@ router.get("/my", verifyToken, async (req, res) => {
 
     const [rows] = await db.execute(
       `SELECT s.saved_id, s.event_id, e.title, e.description,
-              COALESCE(
-                NULLIF(
-                  CONCAT_WS(' - ',
-                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
-                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
-                  ), ''
-                ),
-                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
-                NULL
-              ) AS location,
+              ${getLocationSQL()},
               e.start_time, e.end_time, 
               e.image AS image_path,
               COALESCE(c.name, 'General') AS category

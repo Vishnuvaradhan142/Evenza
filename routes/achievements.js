@@ -169,14 +169,26 @@ router.post("/certificates/:event_id/issue", verifyToken, async (req, res) => {
     }
 
     // 3) insert certificate row (file generation to be handled separately)
-    const [result] = await db.query(
-      "INSERT INTO user_certificates (user_id, event_id) VALUES (?, ?)",
-      [userId, eventId]
-    );
+    let certId;
+    if (process.env.DATABASE_URL) {
+      // PostgreSQL - use RETURNING
+      const [rows] = await db.query(
+        "INSERT INTO user_certificates (user_id, event_id) VALUES (?, ?) RETURNING cert_id",
+        [userId, eventId]
+      );
+      certId = rows && rows[0] ? rows[0].cert_id : undefined;
+    } else {
+      // MySQL - use insertId
+      const [result] = await db.query(
+        "INSERT INTO user_certificates (user_id, event_id) VALUES (?, ?)",
+        [userId, eventId]
+      );
+      certId = result.insertId;
+    }
 
     const [[inserted]] = await db.query(
       "SELECT cert_id, user_id, event_id, issued_at, file_path FROM user_certificates WHERE cert_id = ? LIMIT 1",
-      [result.insertId]
+      [certId]
     );
 
     res.status(201).json({ message: "Certificate issued", certificate: inserted });

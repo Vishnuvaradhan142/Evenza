@@ -80,13 +80,25 @@ router.get("/admin/mine", verifyToken, async (req, res) => {
       if (existing) {
         eventRooms.push(existing);
       } else {
-        // create one
+        // create one - handle both MySQL and PostgreSQL
         const name = ev.title || `Event ${ev.event_id}`;
-        const [ins] = await db.query(
-          `INSERT INTO chatrooms (name, type, event_id) VALUES (?, 'event', ?)`,
-          [name, ev.event_id]
-        );
-        eventRooms.push({ chatroom_id: ins.insertId, name, type: 'event', event_id: ev.event_id });
+        let chatroomId;
+        if (process.env.DATABASE_URL) {
+          // PostgreSQL - use RETURNING
+          const [rows] = await db.query(
+            `INSERT INTO chatrooms (name, type, event_id) VALUES (?, 'event', ?) RETURNING chatroom_id`,
+            [name, ev.event_id]
+          );
+          chatroomId = rows && rows[0] ? rows[0].chatroom_id : undefined;
+        } else {
+          // MySQL - use insertId
+          const [ins] = await db.query(
+            `INSERT INTO chatrooms (name, type, event_id) VALUES (?, 'event', ?)`,
+            [name, ev.event_id]
+          );
+          chatroomId = ins.insertId;
+        }
+        eventRooms.push({ chatroom_id: chatroomId, name, type: 'event', event_id: ev.event_id });
       }
     }
 
@@ -239,17 +251,30 @@ router.post("/:chatroom_id/messages", verifyToken, async (req, res) => {
       }
     }
 
-    const [result] = await db.query(
-      "INSERT INTO chat_messages (chatroom_id, user_id, message) VALUES (?, ?, ?)",
-      [chatroomId, userId, message]
-    );
+    // Insert message - handle both MySQL and PostgreSQL
+    let messageId;
+    if (process.env.DATABASE_URL) {
+      // PostgreSQL - use RETURNING
+      const [rows] = await db.query(
+        "INSERT INTO chat_messages (chatroom_id, user_id, message) VALUES (?, ?, ?) RETURNING message_id",
+        [chatroomId, userId, message]
+      );
+      messageId = rows && rows[0] ? rows[0].message_id : undefined;
+    } else {
+      // MySQL - use insertId
+      const [result] = await db.query(
+        "INSERT INTO chat_messages (chatroom_id, user_id, message) VALUES (?, ?, ?)",
+        [chatroomId, userId, message]
+      );
+      messageId = result.insertId;
+    }
 
     const [[inserted]] = await db.query(
       `SELECT m.message_id, m.chatroom_id, m.user_id, m.message, m.created_at, u.username
        FROM chat_messages m
        JOIN users u ON m.user_id = u.user_id
        WHERE m.message_id = ? LIMIT 1`,
-      [result.insertId]
+      [messageId]
     );
 
     res.status(201).json(inserted);

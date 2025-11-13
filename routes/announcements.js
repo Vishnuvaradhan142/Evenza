@@ -200,13 +200,26 @@ router.post("/", verifyToken, async (req, res) => {
 
 		const now = new Date();
 		const dbStatus = toDbStatus(status);
-		const [result] = await db.query(
-			`INSERT INTO announcements (event_id, title, message, status, scheduled_at, created_by, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			[eventId, title, message, dbStatus, scheduled_at ? new Date(scheduled_at) : null, creator, now, now]
-		);
-
-		const announcementId = result.insertId;
+		
+		// Insert announcement - handle both MySQL and PostgreSQL
+		let announcementId;
+		if (process.env.DATABASE_URL) {
+			// PostgreSQL - use RETURNING
+			const [rows] = await db.query(
+				`INSERT INTO announcements (event_id, title, message, status, scheduled_at, created_by, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING announcement_id`,
+				[eventId, title, message, dbStatus, scheduled_at ? new Date(scheduled_at) : null, creator, now, now]
+			);
+			announcementId = rows && rows[0] ? rows[0].announcement_id : undefined;
+		} else {
+			// MySQL - use insertId
+			const [result] = await db.query(
+				`INSERT INTO announcements (event_id, title, message, status, scheduled_at, created_by, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+				[eventId, title, message, dbStatus, scheduled_at ? new Date(scheduled_at) : null, creator, now, now]
+			);
+			announcementId = result.insertId;
+		}
 
 		// If immediate send requested (status Sent or markSent)
 		if (dbStatus === "sent" || markSent) {
@@ -258,23 +271,49 @@ router.patch("/:id", verifyToken, async (req, res) => {
 				const now = new Date();
 				const targetStatusFromBody = status !== undefined ? toDbStatus(status) : "draft";
 				const eventIdToUse = newEventId != null ? Number(newEventId) || null : (notif.event_id || null);
-				const [ins] = await db.query(
-					`INSERT INTO announcements (event_id, title, message, status, scheduled_at, created_by, created_at, updated_at, sent_at)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
-					[
-						eventIdToUse,
-						title !== undefined ? title : notif.title,
-						message !== undefined ? message : notif.message,
-						targetStatusFromBody,
-						scheduled_at ? new Date(scheduled_at) : null,
-						updater || 0,
-						now,
-						now,
-						targetStatusFromBody === 'sent' ? now : null,
-					]
-				);
-				existing = { announcement_id: ins.insertId, event_id: eventIdToUse, title: title ?? notif.title, message: message ?? notif.message, status: targetStatusFromBody };
-				return res.json({ ok: true, announcementId: ins.insertId });
+				
+				// Insert announcement - handle both MySQL and PostgreSQL
+				let newAnnouncementId;
+				if (process.env.DATABASE_URL) {
+					// PostgreSQL - use RETURNING
+					const [rows] = await db.query(
+						`INSERT INTO announcements (event_id, title, message, status, scheduled_at, created_by, created_at, updated_at, sent_at)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING announcement_id`,
+						[
+							eventIdToUse,
+							title !== undefined ? title : notif.title,
+							message !== undefined ? message : notif.message,
+							targetStatusFromBody,
+							scheduled_at ? new Date(scheduled_at) : null,
+							updater || 0,
+							now,
+							now,
+							targetStatusFromBody === 'sent' ? now : null,
+						]
+					);
+					newAnnouncementId = rows && rows[0] ? rows[0].announcement_id : undefined;
+				} else {
+					// MySQL - use insertId
+					const [ins] = await db.query(
+						`INSERT INTO announcements (event_id, title, message, status, scheduled_at, created_by, created_at, updated_at, sent_at)
+						 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+						[
+							eventIdToUse,
+							title !== undefined ? title : notif.title,
+							message !== undefined ? message : notif.message,
+							targetStatusFromBody,
+							scheduled_at ? new Date(scheduled_at) : null,
+							updater || 0,
+							now,
+							now,
+							targetStatusFromBody === 'sent' ? now : null,
+						]
+					);
+					newAnnouncementId = ins.insertId;
+				}
+				
+				existing = { announcement_id: newAnnouncementId, event_id: eventIdToUse, title: title ?? notif.title, message: message ?? notif.message, status: targetStatusFromBody };
+				return res.json({ ok: true, announcementId: newAnnouncementId });
 			}
 
 		const updates = [];

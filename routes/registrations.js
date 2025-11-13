@@ -181,18 +181,32 @@ router.post("/", verifyToken, async (req, res) => {
       });
     }
 
-    // Insert registration
-    const [result] = await db.query(
-      `INSERT INTO registrations 
-       (user_id, event_id, ticket_type, amount, status, registered_at, registration_time) 
-       VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
-      [userId, event_id, ticket_type || "Free", amount || 0, status || "confirmed"]
-    );
+    // Insert registration - handle both MySQL and PostgreSQL
+    let registrationId;
+    if (process.env.DATABASE_URL) {
+      // PostgreSQL - use RETURNING
+      const [rows] = await db.query(
+        `INSERT INTO registrations 
+         (user_id, event_id, ticket_type, amount, status, registered_at, registration_time) 
+         VALUES (?, ?, ?, ?, ?, NOW(), NOW()) RETURNING registration_id`,
+        [userId, event_id, ticket_type || "Free", amount || 0, status || "confirmed"]
+      );
+      registrationId = rows && rows[0] ? rows[0].registration_id : undefined;
+    } else {
+      // MySQL - use insertId
+      const [result] = await db.query(
+        `INSERT INTO registrations 
+         (user_id, event_id, ticket_type, amount, status, registered_at, registration_time) 
+         VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
+        [userId, event_id, ticket_type || "Free", amount || 0, status || "confirmed"]
+      );
+      registrationId = result.insertId;
+    }
 
     res.json({
       success: true,
       message: "Successfully registered for the event",
-      registration_id: result.insertId,
+      registration_id: registrationId,
     });
   } catch (error) {
     console.error("Error creating registration:", error);

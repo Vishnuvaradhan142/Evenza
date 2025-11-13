@@ -55,14 +55,28 @@ router.post("/:friendId/messages", verifyToken, async (req, res) => {
 
     if (!message) return res.status(400).json({ message: "Message cannot be empty" });
 
-    const [result] = await db.query(
-      `INSERT INTO fmessages (sender_id, receiver_id, message)
-       VALUES (?, ?, ?)`,
-      [userId, friendId, message]
-    );
+    // Insert message - handle both MySQL and PostgreSQL
+    let messageId;
+    if (process.env.DATABASE_URL) {
+      // PostgreSQL - use RETURNING
+      const [rows] = await db.query(
+        `INSERT INTO fmessages (sender_id, receiver_id, message)
+         VALUES (?, ?, ?) RETURNING message_id`,
+        [userId, friendId, message]
+      );
+      messageId = rows && rows[0] ? rows[0].message_id : undefined;
+    } else {
+      // MySQL - use insertId
+      const [result] = await db.query(
+        `INSERT INTO fmessages (sender_id, receiver_id, message)
+         VALUES (?, ?, ?)`,
+        [userId, friendId, message]
+      );
+      messageId = result.insertId;
+    }
 
     res.json({ 
-      message_id: result.insertId,
+      message_id: messageId,
       sender_id: userId,
       receiver_id: friendId,
       message,
