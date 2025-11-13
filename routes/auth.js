@@ -41,13 +41,14 @@ router.post("/signup", async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const [result] = await db.query(
-      "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
+    const [insRows] = await db.query(
+      "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?) RETURNING user_id",
       [username, email, hashedPassword, role]
     );
+    const newUserId = insRows && insRows[0] ? insRows[0].user_id : undefined;
 
     const token = jwt.sign(
-      { user_id: result.insertId, username, role },
+      { user_id: newUserId, username, role },
       JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -56,7 +57,7 @@ router.post("/signup", async (req, res) => {
       message: "User created successfully",
       username,
       role,
-      user_id: result.insertId,
+      user_id: newUserId,
       token,
     });
   } catch (err) {

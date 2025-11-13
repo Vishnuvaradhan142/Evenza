@@ -147,9 +147,9 @@ router.post("/", verifyToken, upload.array("files", 10), async (req, res) => {
     const cap = Number(capacity ?? 0) || 0;
     const needApproval = String(requiresApproval).toLowerCase() === "true";
 
-    const [result] = await db.execute(
+    const [insDraftRows] = await db.execute(
       `INSERT INTO draft_events (title, description, capacity, locations, sessions, start_time, end_time, category_id, requires_approval, submitted_by, submitted_at, status, attachments)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'draft', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'draft', ?) RETURNING draft_id`,
       [
         title,
         description,
@@ -165,7 +165,7 @@ router.post("/", verifyToken, upload.array("files", 10), async (req, res) => {
       ]
     );
 
-    const draftId = result.insertId;
+    const draftId = insDraftRows && insDraftRows[0] ? insDraftRows[0].draft_id : undefined;
 
     // Auto-approve path (no admin approval required)
     if (!needApproval) {
@@ -198,7 +198,7 @@ router.post("/", verifyToken, upload.array("files", 10), async (req, res) => {
 
         const [ins] = await conn.execute(
           `INSERT INTO events (title, description, location, start_time, end_time, latitude, longitude, category_id, created_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()) RETURNING event_id`,
           [
             d.title,
             d.description,
@@ -211,7 +211,7 @@ router.post("/", verifyToken, upload.array("files", 10), async (req, res) => {
             d.submitted_by,
           ]
         );
-        const newEventId = ins.insertId;
+        const newEventId = ins && ins[0] ? ins[0].event_id : undefined;
 
         // Move attachments
   const attachments = parseAttachments(d.attachments);
@@ -553,7 +553,7 @@ router.put("/:id/approve", verifyToken, async (req, res) => {
     // Insert into events table with all required fields
     const [ins] = await conn.execute(
       `INSERT INTO events (title, description, capacity, locations, sessions, documents, category_id, start_time, end_time, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()) RETURNING event_id`,
       [
         d.title,
         d.description,
@@ -567,7 +567,7 @@ router.put("/:id/approve", verifyToken, async (req, res) => {
         d.submitted_by,
       ]
     );
-    const newEventId = ins.insertId;
+    const newEventId = ins && ins[0] ? ins[0].event_id : undefined;
 
     // Handle image from attachments
     const attachments = parseAttachments(d.attachments);
