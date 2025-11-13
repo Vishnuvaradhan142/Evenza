@@ -135,8 +135,8 @@ router.get("/", async (req, res) => {
   try {
     const q = req.query.q ? `%${req.query.q}%` : null;
 
-    // Build WHERE clause: only not completed events
-    const sql = `
+    // Build WHERE clause: only not completed events (portable across MySQL/PostgreSQL)
+    let sql = `
       SELECT
         e.event_id,
         e.title,
@@ -150,17 +150,16 @@ router.get("/", async (req, res) => {
       FROM events e
       LEFT JOIN categories c ON e.category_id = c.category_id
       WHERE e.end_time >= NOW()
-      ${q ? (isPostgres ? ` AND (e.title ILIKE $1 OR e.description ILIKE $2)` : ` AND (e.title LIKE ? OR e.description LIKE ?)`) : ''}
-      ORDER BY e.start_time ASC
     `;
 
     const params = [];
     if (q) {
-      sql += ` AND (e.title LIKE ? OR e.description LIKE ?)`;
+      // Use LOWER(...) LIKE LOWER(?) for cross-DB case-insensitive search
+      sql += ` AND (LOWER(e.title) LIKE LOWER(?) OR LOWER(e.description) LIKE LOWER(?))`;
       params.push(q, q);
     }
 
-    // REMOVED LIMIT to get all events
+    // Order results
     sql += ` ORDER BY e.start_time ASC`;
 
     const [rows] = await db.execute(sql, params);
