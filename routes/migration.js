@@ -275,11 +275,24 @@ router.post("/import-all-data", async (req, res) => {
       await connection.query("TRUNCATE TABLE events CASCADE");
       for (const event of events) {
         await connection.query(
-          `INSERT INTO events (event_id, event_name, description, event_date, location, category_id, 
-           organizer_id, capacity, created_at, sessions) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-          [event.event_id, event.event_name, event.description, event.event_date, event.location,
-           event.category_id, event.organizer_id, event.capacity, event.created_at, JSON.stringify(event.sessions)]
+          `INSERT INTO events (event_id, title, description, capacity, locations, sessions, documents,
+           category_id, start_time, end_time, created_at, created_by, image) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [
+            event.event_id,
+            event.title,
+            event.description,
+            event.capacity,
+            event.locations ? JSON.stringify(event.locations) : null,
+            event.sessions ? JSON.stringify(event.sessions) : null,
+            event.documents ? JSON.stringify(event.documents) : null,
+            event.category_id,
+            event.start_time,
+            event.end_time,
+            event.created_at,
+            event.created_by,
+            event.image || '/uploads/events/default-event.png'
+          ]
         );
       }
       await connection.query("SELECT setval('events_event_id_seq', (SELECT MAX(event_id) FROM events))");
@@ -291,11 +304,17 @@ router.post("/import-all-data", async (req, res) => {
       await connection.query("TRUNCATE TABLE registrations CASCADE");
       for (const reg of registrations) {
         await connection.query(
-          `INSERT INTO registrations (registration_id, event_id, user_id, registration_date, 
-           ticket_type, ticket_price, payment_status) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [reg.registration_id, reg.event_id, reg.user_id, reg.registration_date,
-           reg.ticket_type, reg.ticket_price, reg.payment_status]
+          `INSERT INTO registrations (registration_id, user_id, event_id, registration_date, 
+           status, ticket_type) 
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            reg.registration_id,
+            reg.user_id,
+            reg.event_id,
+            reg.registered_at || reg.registration_time,
+            reg.status,
+            reg.ticket_type
+          ]
         );
       }
       await connection.query("SELECT setval('registrations_registration_id_seq', (SELECT MAX(registration_id) FROM registrations))");
@@ -307,11 +326,16 @@ router.post("/import-all-data", async (req, res) => {
       await connection.query("TRUNCATE TABLE tickets CASCADE");
       for (const ticket of tickets) {
         await connection.query(
-          `INSERT INTO tickets (ticket_id, event_id, user_id, ticket_code, ticket_type, 
-           ticket_price, issued_at, qr_code) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [ticket.ticket_id, ticket.event_id, ticket.user_id, ticket.ticket_code,
-           ticket.ticket_type, ticket.ticket_price, ticket.issued_at, ticket.qr_code]
+          `INSERT INTO tickets (ticket_id, registration_id, ticket_number, qr_code, status, created_at) 
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            ticket.ticket_id,
+            ticket.registration_id,
+            ticket.ticket_code || `TCKT-${ticket.ticket_id}`,
+            ticket.qr_code || null,
+            ticket.status || 'active',
+            ticket.issue_time || ticket.created_at
+          ]
         );
       }
       await connection.query("SELECT setval('tickets_ticket_id_seq', (SELECT MAX(ticket_id) FROM tickets))");
@@ -323,11 +347,11 @@ router.post("/import-all-data", async (req, res) => {
       await connection.query("TRUNCATE TABLE saved_events CASCADE");
       for (const saved of saved_events) {
         await connection.query(
-          "INSERT INTO saved_events (save_id, user_id, event_id, saved_at) VALUES ($1, $2, $3, $4)",
-          [saved.save_id, saved.user_id, saved.event_id, saved.saved_at]
+          "INSERT INTO saved_events (saved_event_id, user_id, event_id, saved_at) VALUES ($1, $2, $3, $4)",
+          [saved.saved_id, saved.user_id, saved.event_id, saved.created_at || saved.saved_at]
         );
       }
-      await connection.query("SELECT setval('saved_events_save_id_seq', (SELECT MAX(save_id) FROM saved_events))");
+      await connection.query("SELECT setval('saved_events_saved_event_id_seq', (SELECT MAX(saved_event_id) FROM saved_events))");
       importedCounts.saved_events = saved_events.length;
     }
 
