@@ -168,4 +168,53 @@ router.post("/setup-schema", async (req, res) => {
   }
 });
 
+// IMPORT USERS - Replace all users with MySQL data
+router.post("/import-users", async (req, res) => {
+  try {
+    console.log("🚀 Starting user import...");
+    
+    // Only works with PostgreSQL
+    if (!process.env.DATABASE_URL) {
+      return res.status(400).json({ message: "This endpoint only works with PostgreSQL (production)" });
+    }
+
+    const { users } = req.body;
+    
+    if (!users || !Array.isArray(users)) {
+      return res.status(400).json({ message: "users array is required" });
+    }
+
+    // Clear existing users
+    await db.query("TRUNCATE TABLE users RESTART IDENTITY CASCADE");
+    console.log("✅ Cleared existing users");
+
+    // Insert all users
+    let count = 0;
+    for (const user of users) {
+      await db.query(
+        `INSERT INTO users (user_id, username, email, password, role, created_at) 
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [user.user_id, user.username, user.email, user.password, user.role, user.created_at]
+      );
+      count++;
+    }
+
+    // Reset sequence
+    await db.query(`SELECT setval('users_user_id_seq', (SELECT MAX(user_id) FROM users))`);
+
+    console.log(`✅ Imported ${count} users`);
+    res.json({ 
+      success: true, 
+      message: `Successfully imported ${count} users` 
+    });
+
+  } catch (err) {
+    console.error("❌ User import failed:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+});
+
 export default router;
