@@ -35,19 +35,84 @@ router.get("/mine", verifyToken, async (req, res) => {
       [userId]
     );
     const origin = `${req.protocol}://${req.get("host")}`;
-    const normalized = (rows || []).map(r => {
-      const raw = r.image_path ? String(r.image_path) : "";
-      const webPath = raw.replace(/\\\\/g, "/").replace(/\\/g, "/");
-      const abs = webPath.startsWith("http") ? webPath : origin + (webPath.startsWith("/") ? webPath : `/${webPath}`);
-      return {
-        ...r,
-        image_path: webPath ? abs : origin + "/uploads/events/default-event.png",
-      };
-    });
+      const normalized = (rows || []).map(r => {
+        const raw = r.image_path ? String(r.image_path) : "";
+        const webPath = raw.replace(/\\/g, "/").replace(/\\/g, "/");
+        let abs = origin + "/uploads/events/default-event.png";
+        if (webPath.startsWith("http")) {
+          abs = webPath;
+        } else if (webPath.startsWith("/uploads/")) {
+          abs = origin + webPath;
+        } else if (webPath) {
+          abs = origin + "/uploads/events/" + webPath;
+        }
+        return {
+          ...r,
+          image_path: webPath ? abs : origin + "/uploads/events/default-event.png",
+        };
+      });
     res.json(normalized);
   } catch (err) {
     console.error("Error fetching owner events:", err.stack || err);
     res.status(500).json({ message: "Error fetching owner events" });
+  }
+});
+
+/**
+ * GET /all
+ * Get ALL events for owner (no filters)
+ */
+router.get("/all", async (req, res) => {
+  try {
+    const sql = `
+      SELECT
+        e.event_id,
+        e.title,
+        e.description,
+        e.capacity,
+        COALESCE(
+          NULLIF(
+            CONCAT_WS(' - ',
+              JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
+              JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
+            ), ''
+          ),
+          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
+          NULL
+        ) AS location,
+        e.start_time,
+        e.end_time,
+        e.image AS image_path,
+        e.created_at,
+        e.created_by,
+        COALESCE(c.name, 'General') AS category
+      FROM events e
+      LEFT JOIN categories c ON e.category_id = c.category_id
+      ORDER BY e.created_at DESC
+    `;
+
+    const [rows] = await db.execute(sql);
+    const origin = `${req.protocol}://${req.get("host")}`;
+      const normalized = (rows || []).map(r => {
+        const raw = r.image_path ? String(r.image_path) : "";
+        const webPath = raw.replace(/\\/g, "/").replace(/\\/g, "/");
+        let abs = origin + "/uploads/events/default-event.png";
+        if (webPath.startsWith("http")) {
+          abs = webPath;
+        } else if (webPath.startsWith("/uploads/")) {
+          abs = origin + webPath;
+        } else if (webPath) {
+          abs = origin + "/uploads/events/" + webPath;
+        }
+        return {
+          ...r,
+          image_path: webPath ? abs : origin + "/uploads/events/default-event.png",
+        };
+      });
+    res.json(normalized);
+  } catch (err) {
+    console.error("Error fetching all events:", err.stack || err);
+    res.status(500).json({ message: "Error fetching all events" });
   }
 });
 
@@ -97,15 +162,22 @@ router.get("/", async (req, res) => {
 
     const [rows] = await db.execute(sql, params);
     const origin = `${req.protocol}://${req.get("host")}`;
-    const normalized = (rows || []).map(r => {
-      const raw = r.image_path ? String(r.image_path) : "";
-      const webPath = raw.replace(/\\\\/g, "/").replace(/\\/g, "/");
-      const abs = webPath.startsWith("http") ? webPath : origin + (webPath.startsWith("/") ? webPath : `/${webPath}`);
-      return {
-        ...r,
-        image_path: webPath ? abs : origin + "/uploads/events/default-event.png",
-      };
-    });
+      const normalized = (rows || []).map(r => {
+        const raw = r.image_path ? String(r.image_path) : "";
+        const webPath = raw.replace(/\\/g, "/").replace(/\\/g, "/");
+        let abs = origin + "/uploads/events/default-event.png";
+        if (webPath.startsWith("http")) {
+          abs = webPath;
+        } else if (webPath.startsWith("/uploads/")) {
+          abs = origin + webPath;
+        } else if (webPath) {
+          abs = origin + "/uploads/events/" + webPath;
+        }
+        return {
+          ...r,
+          image_path: webPath ? abs : origin + "/uploads/events/default-event.png",
+        };
+      });
     res.json(normalized);
   } catch (err) {
     console.error("Error fetching events:", err.stack || err);
@@ -134,9 +206,12 @@ router.get("/:id", async (req, res) => {
            ),
            NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
            NULL
-         ) AS location
+         ) AS location,
+         u.username AS creator_name,
+         u.email AS creator_email
        FROM events e
        LEFT JOIN categories c ON e.category_id = c.category_id
+       LEFT JOIN users u ON e.created_by = u.user_id
        WHERE e.event_id = ?`,
       [eventId]
     );
@@ -146,9 +221,15 @@ router.get("/:id", async (req, res) => {
     const row = rows[0];
     const raw = row.image_path ? String(row.image_path) : "";
     const webPath = raw.replace(/\\\\/g, "/").replace(/\\/g, "/");
-    row.image_path = webPath
-      ? (webPath.startsWith("http") ? webPath : origin + (webPath.startsWith("/") ? webPath : `/${webPath}`))
-      : origin + "/uploads/events/default-event.png";
+      if (webPath.startsWith("http")) {
+        row.image_path = webPath;
+      } else if (webPath.startsWith("/uploads/")) {
+        row.image_path = origin + webPath;
+      } else if (webPath) {
+        row.image_path = origin + "/uploads/events/" + webPath;
+      } else {
+        row.image_path = origin + "/uploads/events/default-event.png";
+      }
     res.json(row);
   } catch (err) {
     console.error("Error fetching event:", err.stack || err);
@@ -164,8 +245,20 @@ router.get("/user/joined", verifyToken, async (req, res) => {
     const userId = req.user.user_id;
 
     const [rows] = await db.execute(
-      `SELECT e.event_id, e.title, e.description, e.location,
-              e.start_time, e.end_time, c.name AS category,
+      `SELECT e.event_id, e.title, e.description,
+              COALESCE(
+                NULLIF(
+                  CONCAT_WS(' - ',
+                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
+                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
+                  ), ''
+                ),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
+                NULL
+              ) AS location,
+              e.start_time, e.end_time, 
+              e.image AS image_path,
+              COALESCE(c.name, 'General') AS category,
               r.registered_at AS registration_date,
               r.status AS registration_status
        FROM events e
@@ -176,7 +269,18 @@ router.get("/user/joined", verifyToken, async (req, res) => {
       [userId]
     );
 
-    res.json(rows);
+    const origin = `${req.protocol}://${req.get("host")}`;
+    const normalized = (rows || []).map(r => {
+      const raw = r.image_path ? String(r.image_path) : "";
+      const webPath = raw.replace(/\\\\/g, "/").replace(/\\/g, "/");
+      const abs = webPath.startsWith("http") ? webPath : origin + (webPath.startsWith("/") ? webPath : `/${webPath}`);
+      return {
+        ...r,
+        image: webPath ? abs : origin + "/uploads/events/default-event.png",
+      };
+    });
+
+    res.json(normalized);
   } catch (err) {
     console.error("Error fetching user joined events:", err.stack || err);
     res.status(500).json({ message: "Error fetching joined events" });
@@ -191,8 +295,20 @@ router.get("/user/upcoming", verifyToken, async (req, res) => {
     const userId = req.user.user_id;
 
     const [rows] = await db.execute(
-      `SELECT e.event_id, e.title, e.description, e.location,
-              e.start_time, e.end_time, c.name AS category,
+      `SELECT e.event_id, e.title, e.description,
+              COALESCE(
+                NULLIF(
+                  CONCAT_WS(' - ',
+                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
+                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
+                  ), ''
+                ),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
+                NULL
+              ) AS location,
+              e.start_time, e.end_time, 
+              e.image AS image_path,
+              COALESCE(c.name, 'General') AS category,
               r.registered_at AS registration_date,
               r.status AS registration_status
        FROM events e
@@ -203,7 +319,18 @@ router.get("/user/upcoming", verifyToken, async (req, res) => {
       [userId]
     );
 
-    res.json(rows);
+    const origin = `${req.protocol}://${req.get("host")}`;
+    const normalized = (rows || []).map(r => {
+      const raw = r.image_path ? String(r.image_path) : "";
+      const webPath = raw.replace(/\\\\/g, "/").replace(/\\/g, "/");
+      const abs = webPath.startsWith("http") ? webPath : origin + (webPath.startsWith("/") ? webPath : `/${webPath}`);
+      return {
+        ...r,
+        image: webPath ? abs : origin + "/uploads/events/default-event.png",
+      };
+    });
+
+    res.json(normalized);
   } catch (err) {
     console.error("Error fetching upcoming events:", err.stack || err);
     res.status(500).json({ message: "Error fetching upcoming events" });

@@ -269,9 +269,9 @@ router.post("/", verifyToken, upload.array("files", 10), async (req, res) => {
 
 /**
  * ✅ FIXED GET /
- * List drafts (admin only)
+ * List drafts (owner can see all drafts)
  */
-router.get("/", verifyToken, requireAdmin, async (req, res) => {
+router.get("/", verifyToken, async (req, res) => {
   try {
     let limitVal = parseInt(req.query.limit, 10);
     if (!Number.isFinite(limitVal) || limitVal < 0) limitVal = 0;
@@ -526,9 +526,9 @@ router.put("/:id", verifyToken, upload.array("files", 10), async (req, res) => {
 });
 
 /**
- * PUT /:id/approve - approve draft (admin only)
+ * PUT /:id/approve - approve draft (owner/admin)
  */
-router.put("/:id/approve", verifyToken, requireAdmin, async (req, res) => {
+router.put("/:id/approve", verifyToken, async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
@@ -544,34 +544,34 @@ router.put("/:id/approve", verifyToken, requireAdmin, async (req, res) => {
     }
 
     const d = rows[0];
-    let locationStr = null;
-    try {
-      const locs = d.locations ? JSON.parse(d.locations) : [];
-      if (Array.isArray(locs) && locs.length > 0) {
-        const first = locs[0] || {};
-        locationStr =
-          [first.name, first.address].filter(Boolean).join(" - ") || null;
-      }
-    } catch {}
+    
+    // Update draft status to approved
+    await conn.execute(
+      `UPDATE draft_events SET status = 'approved' WHERE draft_id = ?`,
+      [id]
+    );
 
+    // Insert into events table with all required fields
     const [ins] = await conn.execute(
-      `INSERT INTO events (title, description, location, start_time, end_time, latitude, longitude, category_id, created_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      `INSERT INTO events (title, description, capacity, locations, sessions, documents, category_id, start_time, end_time, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         d.title,
         d.description,
-        locationStr,
+        d.capacity,
+        d.locations,  // JSON field
+        d.sessions,   // JSON field
+        d.documents,  // JSON field
+        d.category_id,
         d.start_time,
         d.end_time,
-        null,
-        null,
-        d.category_id,
         d.submitted_by,
       ]
     );
     const newEventId = ins.insertId;
 
-  const attachments = parseAttachments(d.attachments);
+    // Handle image from attachments
+    const attachments = parseAttachments(d.attachments);
     const newPaths = [];
     const eventsDir = path.join(process.cwd(), "uploads", "events");
     if (!fs.existsSync(eventsDir)) fs.mkdirSync(eventsDir, { recursive: true });
@@ -596,7 +596,6 @@ router.put("/:id/approve", verifyToken, requireAdmin, async (req, res) => {
       ]);
     }
 
-    await conn.execute(`DELETE FROM draft_events WHERE draft_id = ?`, [id]);
     await conn.commit();
     conn.release();
     res.json({ message: "Draft approved", eventId: newEventId });
@@ -610,7 +609,38 @@ router.put("/:id/approve", verifyToken, requireAdmin, async (req, res) => {
   }
 });
 
-export default router;
+/**
+ * PUT /:id/reject - reject draft (owner/admin)
+ */
+router.put("/:id/reject", verifyToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { review_notes } = req.body;
+    
+    if (!review_notes || !review_notes.trim()) {
+      return res.status(400).json({ message: "Review notes are required for rejection" });
+    }
+
+    const [rows] = await db.execute(
+      `SELECT * FROM draft_events WHERE draft_id = ?`,
+      [id]
+    );
+    
+    if (!rows[0]) {
+      return res.status(404).json({ message: "Draft not found" });
+    }
+
+    await db.execute(
+      `UPDATE draft_events SET status = 'rejected', review_notes = ? WHERE draft_id = ?`,
+      [review_notes.trim(), id]
+    );
+
+    res.json({ message: "Draft rejected" });
+  } catch (err) {
+    console.error("Error rejecting draft:", err.stack || err);
+    res.status(500).json({ message: "Error rejecting draft" });
+  }
+});
 
 /**
  * POST /:id/documents - upload one or more documents to a draft (owner or admin)
@@ -706,3 +736,5 @@ router.put("/:id/documents", verifyToken, async (req, res) => {
     res.status(500).json({ message: "Error renaming document" });
   }
 });
+
+export default router;

@@ -98,14 +98,45 @@ router.get("/admin/mine", verifyToken, async (req, res) => {
 });
 
 /**
+ * GET /api/chatrooms/owner/all
+ * Returns ALL event chatrooms for owner to monitor/participate
+ * Includes Global, Help, and all event chatrooms
+ */
+router.get("/owner/all", verifyToken, async (req, res) => {
+  try {
+    // 1) fixed rooms: Global (1) and Help (2)
+    const [fixedRows] = await db.query(
+      `SELECT chatroom_id, name, type, event_id
+       FROM chatrooms
+       WHERE chatroom_id IN (1,2)
+       ORDER BY FIELD(chatroom_id, 1, 2)`
+    );
+
+    // 2) ALL event rooms (not just owned by owner)
+    const [eventRows] = await db.query(
+      `SELECT c.chatroom_id, c.name, c.type, c.event_id
+       FROM chatrooms c
+       WHERE c.type = 'event'
+       ORDER BY c.chatroom_id DESC`
+    );
+
+    res.json([...(fixedRows || []), ...(eventRows || [])]);
+  } catch (err) {
+    console.error("chatrooms owner/all GET error:", err);
+    res.status(500).json({ error: "Failed to fetch owner chatrooms" });
+  }
+});
+
+/**
  * GET /api/chatrooms/:chatroom_id/messages
  * Returns messages for chatroom. If room is event-type, ensure:
- *  - user is registered (confirmed)
+ *  - user is registered (confirmed) OR user is owner
  *  - event has NOT completed (end_time > NOW())
  */
 router.get("/:chatroom_id/messages", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
+    const userRole = req.user.role; // assuming role is in JWT
     const chatroomId = Number(req.params.chatroom_id);
 
     // fetch chatroom and related event end_time (if any)
@@ -120,10 +151,11 @@ router.get("/:chatroom_id/messages", verifyToken, async (req, res) => {
     if (!chatroom) return res.status(404).json({ error: "Chatroom not found" });
 
     if (chatroom.type === "event") {
-      const isOwner = chatroom.created_by && Number(chatroom.created_by) === Number(userId);
+      const isOwner = userRole === 'owner';
+      const isCreator = chatroom.created_by && Number(chatroom.created_by) === Number(userId);
 
-      if (!isOwner) {
-        // check user registration only if not owner
+      // Owner can access all chatrooms, creator can access their own, others need registration
+      if (!isOwner && !isCreator) {
         const [regs] = await db.query(
           `SELECT 1
            FROM registrations
@@ -136,8 +168,8 @@ router.get("/:chatroom_id/messages", verifyToken, async (req, res) => {
         }
       }
 
-      // ensure event not completed
-      if (!chatroom.end_time || new Date(chatroom.end_time) <= new Date()) {
+      // ensure event not completed (skip check for owner to allow monitoring)
+      if (!isOwner && chatroom.end_time && new Date(chatroom.end_time) <= new Date()) {
         return res.status(403).json({ error: "Event has ended; chat is closed" });
       }
     }
@@ -160,11 +192,12 @@ router.get("/:chatroom_id/messages", verifyToken, async (req, res) => {
 
 /**
  * POST /api/chatrooms/:chatroom_id/messages
- * Insert a new message. For event rooms, require registration and event not completed.
+ * Insert a new message. For event rooms, require registration or owner/creator access, and event not completed.
  */
 router.post("/:chatroom_id/messages", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
+    const userRole = req.user.role;
     const chatroomId = Number(req.params.chatroom_id);
     const { message } = req.body;
 
@@ -183,9 +216,11 @@ router.post("/:chatroom_id/messages", verifyToken, async (req, res) => {
     if (!chatroom) return res.status(404).json({ error: "Chatroom not found" });
 
     if (chatroom.type === "event") {
-      const isOwner = chatroom.created_by && Number(chatroom.created_by) === Number(userId);
+      const isOwner = userRole === 'owner';
+      const isCreator = chatroom.created_by && Number(chatroom.created_by) === Number(userId);
 
-      if (!isOwner) {
+      // Owner can post to all chatrooms, creator can post to their own, others need registration
+      if (!isOwner && !isCreator) {
         const [regs] = await db.query(
           `SELECT 1
            FROM registrations
@@ -198,7 +233,8 @@ router.post("/:chatroom_id/messages", verifyToken, async (req, res) => {
         }
       }
 
-      if (!chatroom.end_time || new Date(chatroom.end_time) <= new Date()) {
+      // ensure event not completed (skip check for owner)
+      if (!isOwner && chatroom.end_time && new Date(chatroom.end_time) <= new Date()) {
         return res.status(403).json({ error: "Event has ended; chat is closed" });
       }
     }

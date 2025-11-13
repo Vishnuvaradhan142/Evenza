@@ -13,8 +13,20 @@ router.get("/my", verifyToken, async (req, res) => {
     const userId = req.user.user_id;
 
     const [rows] = await db.execute(
-      `SELECT s.saved_id, s.event_id, e.title, e.description, e.location,
-              e.start_time, e.end_time, c.name AS category
+      `SELECT s.saved_id, s.event_id, e.title, e.description,
+              COALESCE(
+                NULLIF(
+                  CONCAT_WS(' - ',
+                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
+                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
+                  ), ''
+                ),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
+                NULL
+              ) AS location,
+              e.start_time, e.end_time, 
+              e.image AS image_path,
+              COALESCE(c.name, 'General') AS category
        FROM saved_events s
        JOIN events e ON s.event_id = e.event_id
        LEFT JOIN categories c ON e.category_id = c.category_id
@@ -23,7 +35,18 @@ router.get("/my", verifyToken, async (req, res) => {
       [userId]
     );
 
-    res.json(rows);
+    const origin = `${req.protocol}://${req.get("host")}`;
+    const normalized = (rows || []).map(r => {
+      const raw = r.image_path ? String(r.image_path) : "";
+      const webPath = raw.replace(/\\\\/g, "/").replace(/\\/g, "/");
+      const abs = webPath.startsWith("http") ? webPath : origin + (webPath.startsWith("/") ? webPath : `/${webPath}`);
+      return {
+        ...r,
+        image: webPath ? abs : origin + "/uploads/events/default-event.png",
+      };
+    });
+
+    res.json(normalized);
   } catch (err) {
     console.error("Error fetching saved events:", err);
     res.status(500).json({ message: "Error fetching saved events" });

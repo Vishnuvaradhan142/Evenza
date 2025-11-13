@@ -11,6 +11,31 @@ const router = express.Router();
 const avatarDir = path.join(process.cwd(), "uploads/avatars");
 if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
 
+// Get all admin users
+router.get("/admins", async (req, res) => {
+  try {
+    const [admins] = await db.query(
+      `SELECT user_id, username, email, avatar 
+       FROM users 
+       WHERE role = 'admin' 
+       ORDER BY username ASC`
+    );
+    
+    // Add full URL for avatars
+    const adminsWithFullURL = admins.map(admin => ({
+      ...admin,
+      avatar: admin.avatar 
+        ? `${req.protocol}://${req.get("host")}${admin.avatar}?t=${Date.now()}`
+        : null
+    }));
+    
+    res.json(adminsWithFullURL);
+  } catch (err) {
+    console.error("Error fetching admins:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // Multer setup for avatar uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, avatarDir),

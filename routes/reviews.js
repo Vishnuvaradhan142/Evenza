@@ -82,18 +82,12 @@ router.post("/", verifyToken, async (req, res) => {
   }
 });
 
-export default router;
- 
 // ---------------- Admin: list reviews for admin's events ----------------
-// GET /api/reviews/admin?event_id=optional
+// GET /api/reviews/admin - Owner can see all reviews
 router.get("/admin", async (req, res) => {
   try {
-    const { event_id, owner_id } = req.query || {};
-    const adminUserId = owner_id ? Number(owner_id) : null;
-    if (!adminUserId) return res.status(400).json({ message: "owner_id query param is required" });
+    const { event_id } = req.query || {};
 
-    // Only reviews for events created by this admin/owner
-    const params = [adminUserId];
     let sql = `
       SELECT 
         rr.review_id,
@@ -107,10 +101,11 @@ router.get("/admin", async (req, res) => {
       FROM ratings_reviews rr
       JOIN events e ON e.event_id = rr.event_id
       LEFT JOIN users u ON u.user_id = rr.user_id
-      WHERE e.created_by = ?
     `;
+    
+    const params = [];
     if (event_id) {
-      sql += ` AND rr.event_id = ?`;
+      sql += ` WHERE rr.event_id = ?`;
       params.push(event_id);
     }
     sql += ` ORDER BY rr.created_at DESC`;
@@ -122,3 +117,5 @@ router.get("/admin", async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch reviews', error: err.message });
   }
 });
+
+export default router;

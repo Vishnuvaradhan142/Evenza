@@ -124,7 +124,84 @@ router.post("/notify/:registrationId", verifyToken, async (req, res) => {
   }
 });
 
-export default router;
+// Check if user is already registered for an event
+router.get("/check/:eventId", verifyToken, async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const userId = req.user.user_id;
+
+    const [registrations] = await db.query(
+      "SELECT * FROM registrations WHERE user_id = ? AND event_id = ?",
+      [userId, eventId]
+    );
+
+    res.json({
+      success: true,
+      registered: registrations.length > 0,
+      registration: registrations[0] || null,
+    });
+  } catch (error) {
+    console.error("Error checking registration:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to check registration status",
+    });
+  }
+});
+
+// Register for an event
+router.post("/", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const { event_id, ticket_type, amount, status } = req.body;
+
+    // Check if already registered
+    const [existing] = await db.query(
+      "SELECT * FROM registrations WHERE user_id = ? AND event_id = ?",
+      [userId, event_id]
+    );
+
+    if (existing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "You are already registered for this event",
+      });
+    }
+
+    // Check event exists
+    const [events] = await db.query(
+      "SELECT * FROM events WHERE event_id = ?",
+      [event_id]
+    );
+
+    if (events.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Event not found",
+      });
+    }
+
+    // Insert registration
+    const [result] = await db.query(
+      `INSERT INTO registrations 
+       (user_id, event_id, ticket_type, amount, status, registered_at, registration_time) 
+       VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
+      [userId, event_id, ticket_type || "Free", amount || 0, status || "confirmed"]
+    );
+
+    res.json({
+      success: true,
+      message: "Successfully registered for the event",
+      registration_id: result.insertId,
+    });
+  } catch (error) {
+    console.error("Error creating registration:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to register for event",
+    });
+  }
+});
 
 // --- Additional route: registrations for a specific event (only owner can view) ---
 // GET /api/registrations/by-event/:eventId
@@ -351,3 +428,6 @@ router.patch('/status/bulk', verifyToken, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+export default router;
