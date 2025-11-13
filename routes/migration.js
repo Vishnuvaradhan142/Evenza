@@ -217,4 +217,30 @@ router.post("/import-users", async (req, res) => {
   }
 });
 
+// GET ALL USERS - View current users in database
+router.get("/get-users", async (req, res) => {
+  try {
+    if (!process.env.DATABASE_URL) {
+      return res.status(400).json({ message: "This endpoint only works with PostgreSQL (production)" });
+    }
+
+    const [users] = await db.query(
+      "SELECT user_id, username, email, role, created_at FROM users ORDER BY user_id"
+    );
+
+    res.json({ 
+      success: true, 
+      count: users.length,
+      users: users 
+    });
+
+  } catch (err) {
+    console.error("❌ Get users failed:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+});
+
 export default router;
