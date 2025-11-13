@@ -4,6 +4,34 @@ import db from "../db.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
+const isPostgres = !!process.env.DATABASE_URL;
+
+// Helper function to get location SQL based on database type
+const getLocationSQL = () => {
+  if (isPostgres) {
+    return `COALESCE(
+      NULLIF(
+        CONCAT_WS(' - ',
+          e.locations->0->>'name',
+          e.locations->0->>'address'
+        ), ''
+      ),
+      e.locations->0::text,
+      NULL
+    ) AS location`;
+  } else {
+    return `COALESCE(
+      NULLIF(
+        CONCAT_WS(' -',
+          JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
+          JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
+        ), ''
+      ),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
+      NULL
+    ) AS location`;
+  }
+};
 
 /**
  * GET /mine
@@ -18,16 +46,7 @@ router.get("/mine", verifyToken, async (req, res) => {
          e.title,
          e.start_time,
          e.end_time,
-         COALESCE(
-           NULLIF(
-             CONCAT_WS(' -',
-               JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
-               JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
-             ), ''
-           ),
-           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
-           NULL
-         ) AS location,
+         ${getLocationSQL()},
          e.image AS image_path
        FROM events e
        WHERE e.created_by = ?
@@ -70,16 +89,7 @@ router.get("/all", async (req, res) => {
         e.title,
         e.description,
         e.capacity,
-        COALESCE(
-          NULLIF(
-            CONCAT_WS(' - ',
-              JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
-              JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
-            ), ''
-          ),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
-          NULL
-        ) AS location,
+        ${getLocationSQL()},
         e.start_time,
         e.end_time,
         e.image AS image_path,
@@ -126,21 +136,12 @@ router.get("/", async (req, res) => {
     const q = req.query.q ? `%${req.query.q}%` : null;
 
     // Build WHERE clause: only not completed events
-    let sql = `
+    const sql = `
       SELECT
         e.event_id,
         e.title,
         e.description,
-        COALESCE(
-          NULLIF(
-            CONCAT_WS(' -',
-              JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
-              JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
-            ), ''
-          ),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
-          NULL
-        ) AS location,
+        ${getLocationSQL()},
         e.start_time,
         e.end_time,
         e.image AS image_path,
@@ -149,6 +150,8 @@ router.get("/", async (req, res) => {
       FROM events e
       LEFT JOIN categories c ON e.category_id = c.category_id
       WHERE e.end_time >= NOW()
+      ${q ? (isPostgres ? ` AND (e.title ILIKE $1 OR e.description ILIKE $2)` : ` AND (e.title LIKE ? OR e.description LIKE ?)`) : ''}
+      ORDER BY e.start_time ASC
     `;
 
     const params = [];
@@ -197,16 +200,7 @@ router.get("/:id", async (req, res) => {
          e.*,
          COALESCE(c.name, 'General') AS category,
          e.image AS image_path,
-         COALESCE(
-           NULLIF(
-             CONCAT_WS(' -',
-               JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
-               JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
-             ), ''
-           ),
-           NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
-           NULL
-         ) AS location,
+         ${getLocationSQL()},
          u.username AS creator_name,
          u.email AS creator_email
        FROM events e
@@ -296,16 +290,7 @@ router.get("/user/upcoming", verifyToken, async (req, res) => {
 
     const [rows] = await db.execute(
       `SELECT e.event_id, e.title, e.description,
-              COALESCE(
-                NULLIF(
-                  CONCAT_WS(' - ',
-                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
-                    JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
-                  ), ''
-                ),
-                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
-                NULL
-              ) AS location,
+              ${getLocationSQL()},
               e.start_time, e.end_time, 
               e.image AS image_path,
               COALESCE(c.name, 'General') AS category,
