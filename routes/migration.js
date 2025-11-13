@@ -243,4 +243,185 @@ router.get("/get-users", async (req, res) => {
   }
 });
 
+// IMPORT ALL TABLES DATA - Import all remaining tables from MySQL
+router.post("/import-all-data", async (req, res) => {
+  const connection = await db.getConnection();
+  
+  try {
+    await connection.query("BEGIN");
+    
+    const {
+      categories, events, registrations, tickets, saved_events,
+      chatrooms, chat_messages, friends, notifications, faqs, draft_events
+    } = req.body;
+
+    let importedCounts = {};
+
+    // Import categories
+    if (categories && categories.length > 0) {
+      await connection.query("TRUNCATE TABLE categories CASCADE");
+      for (const cat of categories) {
+        await connection.query(
+          "INSERT INTO categories (category_id, category_name, description) VALUES ($1, $2, $3)",
+          [cat.category_id, cat.category_name, cat.description]
+        );
+      }
+      await connection.query("SELECT setval('categories_category_id_seq', (SELECT MAX(category_id) FROM categories))");
+      importedCounts.categories = categories.length;
+    }
+
+    // Import events
+    if (events && events.length > 0) {
+      await connection.query("TRUNCATE TABLE events CASCADE");
+      for (const event of events) {
+        await connection.query(
+          `INSERT INTO events (event_id, event_name, description, event_date, location, category_id, 
+           organizer_id, capacity, created_at, sessions) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [event.event_id, event.event_name, event.description, event.event_date, event.location,
+           event.category_id, event.organizer_id, event.capacity, event.created_at, JSON.stringify(event.sessions)]
+        );
+      }
+      await connection.query("SELECT setval('events_event_id_seq', (SELECT MAX(event_id) FROM events))");
+      importedCounts.events = events.length;
+    }
+
+    // Import registrations
+    if (registrations && registrations.length > 0) {
+      await connection.query("TRUNCATE TABLE registrations CASCADE");
+      for (const reg of registrations) {
+        await connection.query(
+          `INSERT INTO registrations (registration_id, event_id, user_id, registration_date, 
+           ticket_type, ticket_price, payment_status) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [reg.registration_id, reg.event_id, reg.user_id, reg.registration_date,
+           reg.ticket_type, reg.ticket_price, reg.payment_status]
+        );
+      }
+      await connection.query("SELECT setval('registrations_registration_id_seq', (SELECT MAX(registration_id) FROM registrations))");
+      importedCounts.registrations = registrations.length;
+    }
+
+    // Import tickets
+    if (tickets && tickets.length > 0) {
+      await connection.query("TRUNCATE TABLE tickets CASCADE");
+      for (const ticket of tickets) {
+        await connection.query(
+          `INSERT INTO tickets (ticket_id, event_id, user_id, ticket_code, ticket_type, 
+           ticket_price, issued_at, qr_code) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [ticket.ticket_id, ticket.event_id, ticket.user_id, ticket.ticket_code,
+           ticket.ticket_type, ticket.ticket_price, ticket.issued_at, ticket.qr_code]
+        );
+      }
+      await connection.query("SELECT setval('tickets_ticket_id_seq', (SELECT MAX(ticket_id) FROM tickets))");
+      importedCounts.tickets = tickets.length;
+    }
+
+    // Import saved_events
+    if (saved_events && saved_events.length > 0) {
+      await connection.query("TRUNCATE TABLE saved_events CASCADE");
+      for (const saved of saved_events) {
+        await connection.query(
+          "INSERT INTO saved_events (save_id, user_id, event_id, saved_at) VALUES ($1, $2, $3, $4)",
+          [saved.save_id, saved.user_id, saved.event_id, saved.saved_at]
+        );
+      }
+      await connection.query("SELECT setval('saved_events_save_id_seq', (SELECT MAX(save_id) FROM saved_events))");
+      importedCounts.saved_events = saved_events.length;
+    }
+
+    // Import chatrooms
+    if (chatrooms && chatrooms.length > 0) {
+      await connection.query("TRUNCATE TABLE chatrooms CASCADE");
+      for (const room of chatrooms) {
+        await connection.query(
+          "INSERT INTO chatrooms (chatroom_id, event_id, created_at) VALUES ($1, $2, $3)",
+          [room.chatroom_id, room.event_id, room.created_at]
+        );
+      }
+      await connection.query("SELECT setval('chatrooms_chatroom_id_seq', (SELECT MAX(chatroom_id) FROM chatrooms))");
+      importedCounts.chatrooms = chatrooms.length;
+    }
+
+    // Import chat_messages
+    if (chat_messages && chat_messages.length > 0) {
+      await connection.query("TRUNCATE TABLE chat_messages CASCADE");
+      for (const msg of chat_messages) {
+        await connection.query(
+          "INSERT INTO chat_messages (message_id, chatroom_id, user_id, message, created_at) VALUES ($1, $2, $3, $4, $5)",
+          [msg.message_id, msg.chatroom_id, msg.user_id, msg.message, msg.created_at]
+        );
+      }
+      await connection.query("SELECT setval('chat_messages_message_id_seq', (SELECT MAX(message_id) FROM chat_messages))");
+      importedCounts.chat_messages = chat_messages.length;
+    }
+
+    // Import friends
+    if (friends && friends.length > 0) {
+      await connection.query("TRUNCATE TABLE friends CASCADE");
+      for (const friend of friends) {
+        await connection.query(
+          "INSERT INTO friends (friendship_id, user_id, friend_id, status, created_at) VALUES ($1, $2, $3, $4, $5)",
+          [friend.id, friend.user_id, friend.friend_id, friend.status, friend.created_at]
+        );
+      }
+      await connection.query("SELECT setval('friends_friendship_id_seq', (SELECT MAX(friendship_id) FROM friends))");
+      importedCounts.friends = friends.length;
+    }
+
+    // Import faqs
+    if (faqs && faqs.length > 0) {
+      await connection.query("TRUNCATE TABLE faqs CASCADE");
+      for (const faq of faqs) {
+        await connection.query(
+          "INSERT INTO faqs (faq_id, question, answer, created_at) VALUES ($1, $2, $3, $4)",
+          [faq.faq_id, faq.question, faq.answer, faq.created_at]
+        );
+      }
+      await connection.query("SELECT setval('faqs_faq_id_seq', (SELECT MAX(faq_id) FROM faqs))");
+      importedCounts.faqs = faqs.length;
+    }
+
+    // Import draft_events
+    if (draft_events && draft_events.length > 0) {
+      await connection.query("TRUNCATE TABLE draft_events CASCADE");
+      for (const draft of draft_events) {
+        await connection.query(
+          `INSERT INTO draft_events (draft_id, owner_id, title, description, capacity, locations, sessions, 
+           start_time, end_time, category_id, requires_approval, submitted_by, submitted_at, 
+           status, attachments, documents) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+          [draft.draft_id, draft.submitted_by, draft.title, draft.description, draft.capacity,
+           JSON.stringify(draft.locations), JSON.stringify(draft.sessions), draft.start_time, draft.end_time,
+           draft.category_id, draft.requires_approval, draft.submitted_by, draft.submitted_at,
+           draft.status, JSON.stringify(draft.attachments), JSON.stringify(draft.documents)]
+        );
+      }
+      await connection.query("SELECT setval('draft_events_draft_id_seq', (SELECT MAX(draft_id) FROM draft_events))");
+      importedCounts.draft_events = draft_events.length;
+    }
+
+    await connection.query("COMMIT");
+    console.log("✅ All data imported successfully:", importedCounts);
+
+    res.json({
+      success: true,
+      message: "Successfully imported all data",
+      imported: importedCounts
+    });
+
+  } catch (error) {
+    await connection.query("ROLLBACK");
+    console.error("❌ Import all data failed:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to import data",
+      error: error.message,
+    });
+  } finally {
+    connection.release();
+  }
+});
+
 export default router;
