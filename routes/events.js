@@ -213,20 +213,13 @@ router.get("/:id", async (req, res) => {
     const raw = row.image_path ? String(row.image_path) : "";
     const webPath = raw.replace(/\\\\/g, "/").replace(/\\/g, "/");
       if (webPath.startsWith("http")) {
-        row.image_path = webPath;
-      } else if (webPath.startsWith("/uploads/")) {
-        row.image_path = origin + webPath;
-      } else if (webPath) {
-        row.image_path = origin + "/uploads/events/" + webPath;
-      } else {
-        row.image_path = origin + "/uploads/events/default-event.png";
-      }
-    res.json(row);
-  } catch (err) {
-    console.error("Error fetching event:", err.stack || err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
+          let sql = `
+            SELECT
+              e.*,
+              ${getLocationSQL()}
+            FROM events e
+            WHERE e.end_time >= NOW()
+          `;
 
 /**
  * User's joined events
@@ -266,18 +259,15 @@ router.get("/user/joined", verifyToken, async (req, res) => {
     console.error("Error fetching user joined events:", err.stack || err);
     res.status(500).json({ message: "Error fetching joined events" });
   }
-});
-
-/**
- * User's upcoming events
- */
-router.get("/user/upcoming", verifyToken, async (req, res) => {
-  try {
-    const userId = req.user.user_id;
-
-    const [rows] = await db.execute(
-      `SELECT e.event_id, e.title, e.description,
-              ${getLocationSQL()},
+      `SELECT e.*,
+          ${getLocationSQL()},
+          r.registered_at AS registration_date,
+          r.status AS registration_status
+       FROM events e
+       JOIN registrations r ON e.event_id = r.event_id
+       WHERE r.user_id = ?
+       ORDER BY e.start_time ASC`,
+      [userId]
               e.start_time, e.end_time, 
               e.image AS image_path,
               COALESCE(e.category, 'General') AS category,
@@ -306,18 +296,15 @@ router.get("/user/upcoming", verifyToken, async (req, res) => {
     console.error("Error fetching upcoming events:", err.stack || err);
     res.status(500).json({ message: "Error fetching upcoming events" });
   }
-});
-
-/**
- * Joined count
- */
-router.get("/stats/joined", verifyToken, async (req, res) => {
-  try {
-    const userId = req.user.user_id;
-
-    const [rows] = await db.execute(
-      `SELECT COUNT(*) AS joinedCount
-       FROM registrations
+      `SELECT e.*,
+          ${getLocationSQL()},
+          r.registered_at AS registration_date,
+          r.status AS registration_status
+       FROM events e
+       JOIN registrations r ON e.event_id = r.event_id
+       WHERE r.user_id = ? AND e.start_time >= NOW()
+       ORDER BY e.start_time ASC`,
+      [userId]
        WHERE user_id = ?`,
       [userId]
     );
