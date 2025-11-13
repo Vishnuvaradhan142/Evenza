@@ -23,6 +23,7 @@ import reviewsRoutes from "./routes/reviews.js";
 import achievementsRoutes from "./routes/achievements.js";
 import profileRoutes from "./routes/profile.js";
 import draftsRoutes from "./routes/drafts.js";
+import migrationRoutes from "./routes/migration.js";
 
 dotenv.config();
 
@@ -122,6 +123,7 @@ app.use("/api/reviews", reviewsRoutes);
 app.use("/api/achievements", achievementsRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/drafts", draftsRoutes);
+app.use("/api/migration", migrationRoutes); // One-time migration endpoint
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 // Serve a default event image even if the physical file is missing
