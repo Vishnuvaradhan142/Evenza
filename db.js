@@ -1,59 +1,50 @@
-import mysql from "mysql2/promise";
+import pg from "pg";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// Support both individual DB variables and DATABASE_URL
-let dbConfig;
+const { Pool } = pg;
 
-if (process.env.DATABASE_URL) {
-  // Parse DATABASE_URL if provided (format: mysql://user:pass@host:port/dbname)
-  const url = new URL(process.env.DATABASE_URL);
-  dbConfig = {
-    host: url.hostname,
-    user: url.username,
-    password: url.password,
-    database: url.pathname.slice(1), // Remove leading slash
-    port: parseInt(url.port) || 3306,
-  };
-  console.log("🔍 Using DATABASE_URL for connection");
-} else {
-  // Use individual environment variables
-  dbConfig = {
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    port: parseInt(process.env.DB_PORT) || 3306,
-  };
-  console.log("🔍 Using individual DB variables for connection");
-}
+// Use DATABASE_URL from environment
+const connectionString = process.env.DATABASE_URL;
 
-// Log connection details (without password) for debugging
+console.log("🔍 Using PostgreSQL DATABASE_URL for connection");
 console.log("🔍 DB Config:", {
-  host: dbConfig.host,
-  user: dbConfig.user,
-  database: dbConfig.database,
-  port: dbConfig.port,
-  hasPassword: !!dbConfig.password
+  hasConnectionString: !!connectionString
 });
 
-const db = await mysql.createPool({
-  ...dbConfig,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  connectTimeout: 60000, // 60 seconds
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 0
+const pool = new Pool({
+  connectionString: connectionString,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-// Actually test the connection
+// Test the connection
 try {
-  await db.query("SELECT 1");
-  console.log("✅ DB connection works!");
+  const client = await pool.connect();
+  await client.query("SELECT 1");
+  client.release();
+  console.log("✅ PostgreSQL connection works!");
 } catch (err) {
   console.error("❌ DB connection failed:", err.message);
 }
+
+// Create a wrapper to make PostgreSQL work like mysql2
+const db = {
+  query: async (sql, params) => {
+    // Convert MySQL ? placeholders to PostgreSQL $1, $2, etc.
+    let paramIndex = 1;
+    const pgSql = sql.replace(/\?/g, () => `$${paramIndex++}`);
+    
+    const result = await pool.query(pgSql, params);
+    // Return in mysql2 format: [rows, fields]
+    return [result.rows, result.fields];
+  },
+  execute: async (sql, params) => {
+    let paramIndex = 1;
+    const pgSql = sql.replace(/\?/g, () => `$${paramIndex++}`);
+    const result = await pool.query(pgSql, params);
+    return [result.rows, result.fields];
+  }
+};
 
 export default db;
