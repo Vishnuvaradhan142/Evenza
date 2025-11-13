@@ -7,6 +7,22 @@ import fs from "fs";
 
 const router = express.Router();
 
+// Helper to handle insertId vs RETURNING for MySQL/PostgreSQL
+async function insertAndGetId(query, params, connection = null) {
+  const conn = connection || db;
+  if (process.env.DATABASE_URL) {
+    // PostgreSQL - use RETURNING as-is
+    const [rows] = await conn.execute(query, params);
+    const row = rows && rows[0];
+    return row ? (row.draft_id || row.event_id) : undefined;
+  } else {
+    // MySQL - remove RETURNING clause and use insertId
+    const cleanQuery = query.replace(/ RETURNING \w+$/, '');
+    const [result] = await conn.execute(cleanQuery, params);
+    return result.insertId;
+  }
+}
+
 // === Multer storage setup for drafts ===
 const draftsDir = path.join(process.cwd(), "uploads", "drafts");
 if (!fs.existsSync(draftsDir)) fs.mkdirSync(draftsDir, { recursive: true });
@@ -147,7 +163,7 @@ router.post("/", verifyToken, upload.array("files", 10), async (req, res) => {
     const cap = Number(capacity ?? 0) || 0;
     const needApproval = String(requiresApproval).toLowerCase() === "true";
 
-    const [insDraftRows] = await db.execute(
+    const draftId = await insertAndGetId(
       `INSERT INTO draft_events (title, description, capacity, locations, sessions, start_time, end_time, category_id, requires_approval, submitted_by, submitted_at, status, attachments)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'draft', ?) RETURNING draft_id`,
       [
@@ -164,8 +180,6 @@ router.post("/", verifyToken, upload.array("files", 10), async (req, res) => {
         JSON.stringify(files),
       ]
     );
-
-    const draftId = insDraftRows && insDraftRows[0] ? insDraftRows[0].draft_id : undefined;
 
     // Auto-approve path (no admin approval required)
     if (!needApproval) {
@@ -196,7 +210,7 @@ router.post("/", verifyToken, upload.array("files", 10), async (req, res) => {
           }
         } catch {}
 
-        const [ins] = await conn.execute(
+        const newEventId = await insertAndGetId(
           `INSERT INTO events (title, description, location, start_time, end_time, latitude, longitude, category_id, created_by, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()) RETURNING event_id`,
           [
@@ -209,9 +223,9 @@ router.post("/", verifyToken, upload.array("files", 10), async (req, res) => {
             null,
             d.category_id,
             d.submitted_by,
-          ]
+          ],
+          conn
         );
-        const newEventId = ins && ins[0] ? ins[0].event_id : undefined;
 
         // Move attachments
   const attachments = parseAttachments(d.attachments);
@@ -551,7 +565,7 @@ router.put("/:id/approve", verifyToken, async (req, res) => {
     );
 
     // Insert into events table with all required fields
-    const [ins] = await conn.execute(
+    const newEventId = await insertAndGetId(
       `INSERT INTO events (title, description, capacity, locations, sessions, documents, category_id, start_time, end_time, created_by, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()) RETURNING event_id`,
       [
@@ -565,9 +579,9 @@ router.put("/:id/approve", verifyToken, async (req, res) => {
         d.start_time,
         d.end_time,
         d.submitted_by,
-      ]
+      ],
+      conn
     );
-    const newEventId = ins && ins[0] ? ins[0].event_id : undefined;
 
     // Handle image from attachments
     const attachments = parseAttachments(d.attachments);

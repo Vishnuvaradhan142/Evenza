@@ -41,11 +41,24 @@ router.post("/signup", async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const [insRows] = await db.query(
-      "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?) RETURNING user_id",
-      [username, email, hashedPassword, role]
-    );
-    const newUserId = insRows && insRows[0] ? insRows[0].user_id : undefined;
+    
+    // Handle both MySQL and PostgreSQL
+    let newUserId;
+    if (process.env.DATABASE_URL) {
+      // PostgreSQL - use RETURNING
+      const [insRows] = await db.query(
+        "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?) RETURNING user_id",
+        [username, email, hashedPassword, role]
+      );
+      newUserId = insRows && insRows[0] ? insRows[0].user_id : undefined;
+    } else {
+      // MySQL - use insertId
+      const [result] = await db.query(
+        "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
+        [username, email, hashedPassword, role]
+      );
+      newUserId = result.insertId;
+    }
 
     const token = jwt.sign(
       { user_id: newUserId, username, role },
