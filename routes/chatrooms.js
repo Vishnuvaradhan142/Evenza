@@ -15,16 +15,14 @@ router.get("/", verifyToken, async (req, res) => {
     const userId = req.user.user_id;
 
     // 1) fixed rooms: Global (1) and Help (2)
+    // Select all columns to avoid referencing DB-specific column names that may differ between MySQL/Postgres
     const [fixedRows] = await db.query(
-      `SELECT chatroom_id, name, type, event_id
-       FROM chatrooms
-       WHERE chatroom_id IN (1,2)
-       ORDER BY FIELD(chatroom_id, 1, 2)`
+      `SELECT * FROM chatrooms WHERE chatroom_id IN (1,2) ORDER BY chatroom_id`
     );
 
     // 2) event rooms where the user has a confirmed registration AND event is NOT completed
     const [eventRows] = await db.query(
-      `SELECT DISTINCT c.chatroom_id, c.name, c.type, c.event_id, e.end_time
+      `SELECT DISTINCT c.*, e.end_time
        FROM chatrooms c
        JOIN events e ON e.event_id = c.event_id
        JOIN registrations r ON r.event_id = c.event_id
@@ -35,14 +33,29 @@ router.get("/", verifyToken, async (req, res) => {
     );
 
     // Filter out chatrooms whose events have completed (do in JS to avoid SQL errors if end_time missing)
+    // Normalize rows: build a consistent `name` field and return only expected props
+    const origin = `${req.protocol}://${req.get("host")}`;
+    const normalizeRoom = (row) => {
+      const name = row.name || row.chatroom_name || row.title || row.room_name || `Chatroom ${row.chatroom_id}`;
+      return {
+        chatroom_id: row.chatroom_id,
+        name,
+        type: row.type,
+        event_id: row.event_id,
+        end_time: row.end_time || null,
+      };
+    };
+
+    const fixed = (fixedRows || []).map(normalizeRoom);
+
     const eventFiltered = (eventRows || []).filter((r) => {
       const end = r.end_time || r.ends_at || r.end || null;
       if (!end) return true;
       const endDate = new Date(end);
       return isNaN(endDate.getTime()) ? true : endDate > new Date();
-    });
+    }).map(normalizeRoom);
 
-    res.json([...(fixedRows || []), ...eventFiltered]);
+    res.json([ ...fixed, ...eventFiltered ]);
   } catch (err) {
     console.error("chatrooms GET error:", err);
     res.status(500).json({ error: "Failed to fetch chatrooms" });
@@ -60,10 +73,7 @@ router.get("/admin/mine", verifyToken, async (req, res) => {
 
     // 1) fixed rooms for admins too: Global (1) and Help (2)
     const [fixedRows] = await db.query(
-      `SELECT chatroom_id, name, type, event_id
-       FROM chatrooms
-       WHERE chatroom_id IN (1,2)
-       ORDER BY FIELD(chatroom_id, 1, 2)`
+      `SELECT * FROM chatrooms WHERE chatroom_id IN (1,2) ORDER BY chatroom_id`
     );
 
     // 2) ensure each owned NOT-COMPLETED event (end_time > NOW()) has a chatroom; create if missing
@@ -79,7 +89,7 @@ router.get("/admin/mine", verifyToken, async (req, res) => {
       if (end && !isNaN(new Date(end).getTime()) && new Date(end) <= new Date()) continue;
       // find chatroom for this event
       const [[existing]] = await db.query(
-        `SELECT chatroom_id, name, type, event_id FROM chatrooms WHERE event_id = ? LIMIT 1`,
+        `SELECT * FROM chatrooms WHERE event_id = ? LIMIT 1`,
         [ev.event_id]
       );
       if (existing) {
@@ -89,7 +99,7 @@ router.get("/admin/mine", verifyToken, async (req, res) => {
         const name = ev.title || `Event ${ev.event_id}`;
         let chatroomId;
         if (process.env.DATABASE_URL) {
-          // PostgreSQL - use RETURNING
+          // PostgreSQL - use RETURNING (use parameter placeholders supported by db wrapper)
           const [rows] = await db.query(
             `INSERT INTO chatrooms (name, type, event_id) VALUES (?, 'event', ?) RETURNING chatroom_id`,
             [name, ev.event_id]
