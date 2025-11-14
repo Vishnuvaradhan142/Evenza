@@ -22,7 +22,7 @@ router.get("/", verifyToken, async (req, res) => {
 
     // 2) event rooms where the user has a confirmed registration AND event is NOT completed
     const [eventRows] = await db.query(
-      `SELECT DISTINCT c.*, e.end_time
+      `SELECT DISTINCT c.*, e.*
        FROM chatrooms c
        JOIN events e ON e.event_id = c.event_id
        JOIN registrations r ON r.event_id = c.event_id
@@ -168,7 +168,7 @@ router.get("/:chatroom_id/messages", verifyToken, async (req, res) => {
 
     // fetch chatroom and related event end_time (if any)
     const [[chatroom]] = await db.query(
-      `SELECT c.chatroom_id, c.type, c.event_id, e.end_time, e.created_by
+      `SELECT c.chatroom_id, c.type, c.event_id, e.*
        FROM chatrooms c
        LEFT JOIN events e ON e.event_id = c.event_id
        WHERE c.chatroom_id = ? LIMIT 1`,
@@ -233,7 +233,7 @@ router.post("/:chatroom_id/messages", verifyToken, async (req, res) => {
     }
 
     const [[chatroom]] = await db.query(
-      `SELECT c.chatroom_id, c.type, c.event_id, e.end_time, e.created_by
+      `SELECT c.chatroom_id, c.type, c.event_id, e.*
        FROM chatrooms c
        LEFT JOIN events e ON e.event_id = c.event_id
        WHERE c.chatroom_id = ? LIMIT 1`,
