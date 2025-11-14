@@ -41,28 +41,36 @@ router.get("/my", verifyToken, async (req, res) => {
     const userId = req.user.user_id;
 
     const [rows] = await db.execute(
-      `SELECT s.saved_id, s.event_id, e.title, e.description,
-              ${getLocationSQL()},
-              e.start_time, e.end_time, 
-              e.image AS image_path,
-              COALESCE(c.name, 'General') AS category
-       FROM saved_events s
+      `SELECT s.*, e.* FROM saved_events s
        JOIN events e ON s.event_id = e.event_id
        LEFT JOIN categories c ON e.category_id = c.category_id
-       WHERE s.user_id = ?
-       ORDER BY e.start_time ASC`,
+       WHERE s.user_id = ?`,
       [userId]
     );
 
     const origin = `${req.protocol}://${req.get("host")}`;
-    const normalized = (rows || []).map(r => {
-      const raw = r.image_path ? String(r.image_path) : "";
-      const webPath = raw.replace(/\\\\/g, "/").replace(/\\/g, "/");
+    const normalized = (rows || []).map((r) => {
+      const raw = r.image || r.image_path || "";
+      const webPath = String(raw).replace(/\\\\/g, "/").replace(/\\/g, "/");
       const abs = webPath.startsWith("http") ? webPath : origin + (webPath.startsWith("/") ? webPath : `/${webPath}`);
       return {
-        ...r,
+        saved_id: r.saved_id,
+        event_id: r.event_id,
+        title: r.title,
+        description: r.description,
+        location: r.location || (r.locations ? JSON.stringify(r.locations) : null),
+        start_time: r.start_time || r.start || r.starts_at || null,
+        end_time: r.end_time || r.end || r.ends_at || null,
         image: webPath ? abs : origin + "/uploads/events/default-event.png",
+        category: r.category || r.category_name || 'General',
       };
+    });
+
+    // Sort by start_time if available
+    normalized.sort((a, b) => {
+      const aStart = new Date(a.start_time || 0).getTime();
+      const bStart = new Date(b.start_time || 0).getTime();
+      return aStart - bStart;
     });
 
     res.json(normalized);

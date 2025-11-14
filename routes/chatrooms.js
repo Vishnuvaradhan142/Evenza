@@ -24,19 +24,25 @@ router.get("/", verifyToken, async (req, res) => {
 
     // 2) event rooms where the user has a confirmed registration AND event is NOT completed
     const [eventRows] = await db.query(
-      `SELECT DISTINCT c.chatroom_id, c.name, c.type, c.event_id
+      `SELECT DISTINCT c.chatroom_id, c.name, c.type, c.event_id, e.end_time
        FROM chatrooms c
        JOIN events e ON e.event_id = c.event_id
        JOIN registrations r ON r.event_id = c.event_id
        WHERE c.type = 'event'
          AND r.user_id = ?
-         AND LOWER(r.status) = 'confirmed'
-         AND e.end_time > NOW()
-       ORDER BY c.chatroom_id ASC`,
+         AND LOWER(r.status) = 'confirmed'`,
       [userId]
     );
 
-    res.json([...fixedRows, ...eventRows]);
+    // Filter out chatrooms whose events have completed (do in JS to avoid SQL errors if end_time missing)
+    const eventFiltered = (eventRows || []).filter((r) => {
+      const end = r.end_time || r.ends_at || r.end || null;
+      if (!end) return true;
+      const endDate = new Date(end);
+      return isNaN(endDate.getTime()) ? true : endDate > new Date();
+    });
+
+    res.json([...(fixedRows || []), ...eventFiltered]);
   } catch (err) {
     console.error("chatrooms GET error:", err);
     res.status(500).json({ error: "Failed to fetch chatrooms" });
@@ -62,16 +68,15 @@ router.get("/admin/mine", verifyToken, async (req, res) => {
 
     // 2) ensure each owned NOT-COMPLETED event (end_time > NOW()) has a chatroom; create if missing
     const [ownedEvents] = await db.query(
-      `SELECT e.event_id, e.title, e.start_time, e.end_time
-       FROM events e
-       WHERE e.created_by = ?
-         AND e.end_time > NOW()
-       ORDER BY e.start_time DESC, e.event_id DESC`,
+      `SELECT e.* FROM events e WHERE e.created_by = ?`,
       [userId]
     );
 
     const eventRooms = [];
     for (const ev of ownedEvents || []) {
+      // skip events that are already completed (JS check)
+      const end = ev.end_time || ev.ends_at || ev.end || null;
+      if (end && !isNaN(new Date(end).getTime()) && new Date(end) <= new Date()) continue;
       // find chatroom for this event
       const [[existing]] = await db.query(
         `SELECT chatroom_id, name, type, event_id FROM chatrooms WHERE event_id = ? LIMIT 1`,

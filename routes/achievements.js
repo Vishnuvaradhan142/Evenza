@@ -111,18 +111,21 @@ router.get("/certificates", verifyToken, async (req, res) => {
     const userId = req.user.user_id;
 
     const [rows] = await db.query(
-      `SELECT e.event_id, e.title, e.location, e.start_time, e.end_time,
-              uc.cert_id, uc.issued_at, uc.file_path
+      `SELECT e.*, uc.cert_id, uc.issued_at, uc.file_path, r.*
        FROM registrations r
        JOIN events e ON r.event_id = e.event_id
        LEFT JOIN user_certificates uc ON uc.user_id = r.user_id AND uc.event_id = r.event_id
-       WHERE r.user_id = ? AND LOWER(r.status) = 'confirmed' AND e.end_time <= NOW()
-       ORDER BY e.end_time DESC`,
+       WHERE r.user_id = ? AND LOWER(r.status) = 'confirmed'`,
       [userId]
     );
 
-    // convert dates to ISO for consistent JSON
-    const out = rows.map((r) => ({
+    const now = new Date();
+    const filtered = (rows || []).filter((r) => {
+      const end = r.end_time || r.ends_at || r.end || null;
+      if (!end) return false;
+      const endDate = new Date(end);
+      return !isNaN(endDate.getTime()) && endDate <= now;
+    }).map((r) => ({
       event_id: r.event_id,
       title: r.title,
       location: r.location,
@@ -131,7 +134,14 @@ router.get("/certificates", verifyToken, async (req, res) => {
       certificate: r.cert_id ? { cert_id: r.cert_id, issued_at: r.issued_at, file_path: r.file_path } : null
     }));
 
-    res.json(out);
+    // Sort by end_time desc
+    filtered.sort((a, b) => {
+      const aEnd = new Date(a.end_time || 0).getTime();
+      const bEnd = new Date(b.end_time || 0).getTime();
+      return bEnd - aEnd;
+    });
+
+    res.json(filtered);
   } catch (err) {
     console.error("Achievements /certificates GET error:", err);
     res.status(500).json({ error: "Failed to fetch certificates" });
@@ -149,13 +159,15 @@ router.post("/certificates/:event_id/issue", verifyToken, async (req, res) => {
     const eventId = Number(req.params.event_id);
 
     // 1) verify user was registered + confirmed for the event and event completed
-    const [[reg]] = await db.query(
-      `SELECT r.* FROM registrations r JOIN events e ON r.event_id = e.event_id
-       WHERE r.user_id = ? AND r.event_id = ? AND LOWER(r.status) = 'confirmed' AND e.end_time <= NOW() LIMIT 1`,
+    const [regRows] = await db.query(
+      `SELECT r.*, e.end_time FROM registrations r JOIN events e ON r.event_id = e.event_id
+       WHERE r.user_id = ? AND r.event_id = ? AND LOWER(r.status) = 'confirmed' LIMIT 1`,
       [userId, eventId]
     );
-
-    if (!reg) {
+    const reg = regRows && regRows[0];
+    if (!reg) return res.status(403).json({ error: "Not eligible to receive a certificate for this event" });
+    const endTime = reg.end_time || reg.ends_at || reg.end || null;
+    if (!endTime || isNaN(new Date(endTime).getTime()) || new Date(endTime) > new Date()) {
       return res.status(403).json({ error: "Not eligible to receive a certificate for this event" });
     }
 

@@ -18,23 +18,41 @@ router.get("/", verifyToken, async (req, res) => {
     const userId = req.user?.user_id || req.user?.id;
     if (!userId) return res.status(400).json({ message: "User id missing from token" });
 
+    // Select registrations/events and filter completed events in JS to avoid SQL column-missing errors
     const sql = `
-      SELECT e.event_id,
-             e.title,
-             e.location,
-             e.start_time,
-             e.end_time,
-             r.rating,
-             r.review,
-             r.created_at AS reviewed_at
+      SELECT e.*, r.rating, r.review, r.created_at AS reviewed_at, reg.*
       FROM events e
       INNER JOIN registrations reg ON reg.event_id = e.event_id
       LEFT JOIN ratings_reviews r ON r.event_id = e.event_id AND r.user_id = ?
-      WHERE reg.user_id = ? AND e.end_time <= NOW()
-      ORDER BY e.end_time DESC
+      WHERE reg.user_id = ?
     `;
     const [rows] = await db.query(sql, [userId, userId]);
-    res.json(rows);
+
+    const now = new Date();
+    const filtered = (rows || []).filter((row) => {
+      const end = row.end_time || row.ends_at || row.end || null;
+      if (!end) return false; // if we can't determine end, exclude from completed
+      const endDate = new Date(end);
+      return !isNaN(endDate.getTime()) && endDate <= now;
+    }).map((row) => ({
+      event_id: row.event_id,
+      title: row.title,
+      location: row.location || null,
+      start_time: row.start_time || null,
+      end_time: row.end_time || null,
+      rating: row.rating || null,
+      review: row.review || null,
+      reviewed_at: row.reviewed_at || null,
+    }));
+
+    // Sort by end_time desc
+    filtered.sort((a, b) => {
+      const aEnd = new Date(a.end_time || 0).getTime();
+      const bEnd = new Date(b.end_time || 0).getTime();
+      return bEnd - aEnd;
+    });
+
+    res.json(filtered);
   } catch (err) {
     console.error("GET /api/reviews error:", err);
     res.status(500).json({ message: "Failed to fetch completed events for review", error: err.message });
@@ -56,14 +74,18 @@ router.post("/", verifyToken, async (req, res) => {
       return res.status(400).json({ message: "event_id and rating are required" });
     }
     // Optionally: validate that user registered and event ended:
-    const [[regCheck]] = await db.query(
-      `SELECT 1 FROM registrations r
-       JOIN events e ON e.event_id = r.event_id
-       WHERE r.user_id = ? AND r.event_id = ? AND e.end_time <= NOW() LIMIT 1`,
+    // Verify registration exists and that event has completed using JS-safe checks
+    const [regRows] = await db.query(
+      `SELECT r.*, e.end_time FROM registrations r JOIN events e ON e.event_id = r.event_id WHERE r.user_id = ? AND r.event_id = ? LIMIT 1`,
       [userId, event_id]
     );
+    const regCheck = regRows && regRows[0];
     if (!regCheck) {
-      return res.status(403).json({ message: "You did not register for this event or it hasn't completed yet" });
+      return res.status(403).json({ message: "You did not register for this event" });
+    }
+    const endTime = regCheck.end_time || regCheck.ends_at || regCheck.end || null;
+    if (!endTime || isNaN(new Date(endTime).getTime()) || new Date(endTime) > new Date()) {
+      return res.status(403).json({ message: "Event has not completed yet" });
     }
 
     // Upsert (Insert or update existing)

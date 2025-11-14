@@ -13,15 +13,27 @@ router.get("/user", verifyToken, async (req, res) => {
       return res.status(400).json({ message: "User ID missing" });
     }
 
+    // Select whole notification row to avoid depending on specific column names
     const [rows] = await db.execute(
-      `SELECT notification_id, user_id, event_id, type, title, message, status, is_read, created_at, sent_at
-       FROM notifications
-       WHERE user_id = ?
-       ORDER BY created_at DESC`,
+      `SELECT n.* FROM notifications n WHERE n.user_id = ?`,
       [userId]
     );
 
-    res.json(rows);
+    // Normalize and sort client-side (created_at may be named differently across DBs)
+    const out = (rows || []).map((r) => ({
+      ...r,
+      event_id: r.event_id ?? r.eventId ?? r.event || null,
+      created_at: r.created_at ?? r.createdAt ?? r.created || null,
+      sent_at: r.sent_at ?? r.sentAt ?? null,
+    }));
+
+    out.sort((a, b) => {
+      const aT = new Date(a.created_at || 0).getTime();
+      const bT = new Date(b.created_at || 0).getTime();
+      return bT - aT; // DESC
+    });
+
+    res.json(out);
   } catch (err) {
     console.error("Error fetching notifications:", err);
     res.status(500).json({ message: "Error fetching notifications" });
@@ -62,10 +74,22 @@ router.get("/owner", verifyToken, async (req, res) => {
       params.push(event_id);
     }
 
-    sql += ` ORDER BY created_at DESC`;
-
+    // Remove ORDER BY to avoid errors if created_at missing; sort in JS instead
     const [rows] = await db.execute(sql, params);
-    res.json(rows || []);
+    const out = (rows || []).map((r) => ({
+      ...r,
+      event_id: r.event_id ?? r.eventId ?? r.event || null,
+      created_at: r.created_at ?? r.createdAt ?? r.created || null,
+      sent_at: r.sent_at ?? r.sentAt ?? null,
+    }));
+
+    out.sort((a, b) => {
+      const aT = new Date(a.created_at || 0).getTime();
+      const bT = new Date(b.created_at || 0).getTime();
+      return bT - aT; // DESC
+    });
+
+    res.json(out || []);
   } catch (err) {
     console.error("Error fetching owner notifications:", err);
     res.status(500).json({ message: "Error fetching owner notifications" });

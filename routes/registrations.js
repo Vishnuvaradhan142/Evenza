@@ -13,20 +13,9 @@ router.get("/my-waitlist", verifyToken, async (req, res) => {
     const userId = req.user.user_id;
 
     const [rows] = await db.execute(
-      `SELECT 
-          r.registration_id,
-          TRIM(LOWER(r.status)) AS status,
-          e.event_id,
-          e.title AS eventName,
-          e.start_time,
-          e.end_time,
-          e.location,
-          e.description,
+      `SELECT r.*, e.*,
           COALESCE(c.name, 'General') AS category,
-          CASE 
-            WHEN n.notification_id IS NOT NULL THEN 1 
-            ELSE 0 
-          END AS already_notified
+          CASE WHEN n.notification_id IS NOT NULL THEN 1 ELSE 0 END AS already_notified
        FROM registrations r
        JOIN events e ON r.event_id = e.event_id
        LEFT JOIN categories c ON e.category_id = c.category_id
