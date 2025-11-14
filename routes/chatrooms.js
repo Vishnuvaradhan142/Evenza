@@ -145,12 +145,42 @@ router.get("/owner/all", verifyToken, async (req, res) => {
       `SELECT * FROM chatrooms WHERE chatroom_id IN (1,2) ORDER BY chatroom_id`
     );
 
-    // 2) ALL event rooms (not just owned by owner)
+    // 2) ALL event rooms (but only include upcoming events -> filter completed events)
     const [eventRows] = await db.query(
-      `SELECT * FROM chatrooms c WHERE c.event_id IS NOT NULL ORDER BY c.chatroom_id DESC`
+      `SELECT DISTINCT c.*, e.*
+       FROM chatrooms c
+       JOIN events e ON e.event_id = c.event_id
+       WHERE c.event_id IS NOT NULL
+       ORDER BY c.chatroom_id DESC`
     );
 
-    res.json([...(fixedRows || []), ...(eventRows || [])]);
+    // Normalize and filter out completed events (do in JS to avoid DB column-name assumptions)
+    const normalizeRoom = (row) => {
+      const eventTitle = row.title || row.event_name || row.name || row.event_title || row.eventName;
+      let name = eventTitle || row.chatroom_name || row.room_name || `Chatroom ${row.chatroom_id}`;
+      if (row.chatroom_id === 1) name = row.name || 'Global Chat';
+      if (row.chatroom_id === 2) name = row.name || 'Help Chat';
+      const type = row.type || (row.event_id ? 'event' : 'channel');
+      return {
+        chatroom_id: row.chatroom_id,
+        name,
+        type,
+        event_id: row.event_id,
+        end_time: row.end_time || row.ends_at || row.end || row.event_end || null,
+      };
+    };
+
+    const fixed = (fixedRows || []).map((r) => normalizeRoom(r));
+    const now = new Date();
+    const eventFiltered = (eventRows || []).map((r) => normalizeRoom(r)).filter((r) => {
+      if (!r.event_id) return false;
+      const end = r.end_time;
+      if (!end) return true;
+      const endDate = new Date(end);
+      return isNaN(endDate.getTime()) ? true : endDate > now;
+    });
+
+    res.json([ ...fixed, ...eventFiltered ]);
   } catch (err) {
     console.error("chatrooms owner/all GET error:", err);
     res.status(500).json({ error: "Failed to fetch owner chatrooms" });
