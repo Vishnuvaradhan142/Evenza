@@ -26,7 +26,7 @@ router.get("/", verifyToken, async (req, res) => {
        FROM chatrooms c
        JOIN events e ON e.event_id = c.event_id
        JOIN registrations r ON r.event_id = c.event_id
-       WHERE c.type = 'event'
+       WHERE c.event_id IS NOT NULL
          AND r.user_id = ?
          AND LOWER(r.status) = 'confirmed'`,
       [userId]
@@ -37,10 +37,11 @@ router.get("/", verifyToken, async (req, res) => {
     const origin = `${req.protocol}://${req.get("host")}`;
     const normalizeRoom = (row) => {
       const name = row.name || row.chatroom_name || row.title || row.room_name || `Chatroom ${row.chatroom_id}`;
+      const type = row.type || (row.event_id ? 'event' : 'channel');
       return {
         chatroom_id: row.chatroom_id,
         name,
-        type: row.type,
+        type,
         event_id: row.event_id,
         end_time: row.end_time || null,
       };
@@ -133,18 +134,12 @@ router.get("/owner/all", verifyToken, async (req, res) => {
   try {
     // 1) fixed rooms: Global (1) and Help (2)
     const [fixedRows] = await db.query(
-      `SELECT chatroom_id, name, type, event_id
-       FROM chatrooms
-       WHERE chatroom_id IN (1,2)
-       ORDER BY FIELD(chatroom_id, 1, 2)`
+      `SELECT * FROM chatrooms WHERE chatroom_id IN (1,2) ORDER BY chatroom_id`
     );
 
     // 2) ALL event rooms (not just owned by owner)
     const [eventRows] = await db.query(
-      `SELECT c.chatroom_id, c.name, c.type, c.event_id
-       FROM chatrooms c
-       WHERE c.type = 'event'
-       ORDER BY c.chatroom_id DESC`
+      `SELECT * FROM chatrooms c WHERE c.event_id IS NOT NULL ORDER BY c.chatroom_id DESC`
     );
 
     res.json([...(fixedRows || []), ...(eventRows || [])]);
