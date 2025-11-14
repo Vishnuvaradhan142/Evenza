@@ -11,6 +11,7 @@ import path from "path";
 // Routes
 import authRoutes from "./routes/auth.js";
 import eventRoutes from "./routes/events.js";
+import userCompatRoutes from "./routes/userCompat.js";
 import notificationsRoutes from "./routes/notifications.js";
 import announcementsRoutes, { startScheduler as startAnnouncementsScheduler } from "./routes/announcements.js";
 import ticketRoutes from "./routes/tickets.js";
@@ -111,6 +112,8 @@ await ensureSchema();
 // ----------------- Routes -----------------
 app.use("/api/auth", authRoutes);
 app.use("/api/events", eventRoutes);
+// Compatibility: support older frontend paths like /api/user/joined -> mapped handlers
+app.use("/api/user", userCompatRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/announcements", announcementsRoutes);
 app.use("/api/tickets", ticketRoutes);
