@@ -36,22 +36,67 @@ const parsePossibleDate = (val) => {
 router.get("/", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
-    // Return only event chatrooms the user is registered for (confirmed) and that are not completed.
-    const [eventRows] = await db.query(
-      `SELECT DISTINCT c.*, e.*
-       FROM chatrooms c
-       JOIN events e ON e.event_id = c.event_id
-       JOIN registrations r ON r.event_id = c.event_id
-       WHERE c.event_id IS NOT NULL
-         AND r.user_id = ?
-         AND LOWER(r.status) = 'confirmed'`,
+    // Return fixed rooms (Global & Help) + event chatrooms where the user
+    // is registered (confirmed) and the related event is not completed.
+    // Implementation note: we avoid relying on specific event column names in SQL
+    // by selecting full event rows and doing robust parsing in JS.
+
+    // 1) fixed rooms
+    const [fixedRows] = await db.query(
+      `SELECT * FROM chatrooms WHERE chatroom_id IN (1,2) ORDER BY chatroom_id`
+    );
+
+    // 2) get confirmed registrations for this user
+    const [regs] = await db.query(
+      `SELECT DISTINCT event_id FROM registrations WHERE user_id = ? AND LOWER(status) = 'confirmed'`,
       [userId]
     );
 
-    // Normalize rows: prefer event title for name and compute end_time fallbacks
+    const eventChatrooms = [];
+    const now = new Date();
+
+    for (const r of regs || []) {
+      const evId = r.event_id;
+      if (!evId) continue;
+
+      // load event row (SELECT * safe across DBs)
+      const [[eventRow]] = await db.query(`SELECT * FROM events WHERE event_id = ? LIMIT 1`, [evId]);
+      if (!eventRow) continue;
+
+      // find a sensible end timestamp from the event row
+      const possibleEndKeys = Object.keys(eventRow).filter(k => /end/i.test(k));
+      let endVal = null;
+      for (const k of possibleEndKeys) {
+        if (eventRow[k]) { endVal = eventRow[k]; break; }
+      }
+
+      const endDate = parsePossibleDate(endVal);
+      // if endDate exists and is <= now, skip (completed)
+      if (endDate && endDate <= now) continue;
+
+      // event is upcoming (or end unknown) -> include its chatroom
+      const [[chatroomRow]] = await db.query(`SELECT * FROM chatrooms WHERE event_id = ? LIMIT 1`, [evId]);
+      if (!chatroomRow) continue;
+
+      // normalize name and type
+      const eventTitle = eventRow.title || eventRow.event_name || eventRow.event_title || chatroomRow.name || chatroomRow.chatroom_name;
+      const name = eventTitle || chatroomRow.chatroom_name || chatroomRow.room_name || `Chatroom ${chatroomRow.chatroom_id}`;
+      const type = chatroomRow.type || (chatroomRow.event_id ? 'event' : 'channel');
+
+      eventChatrooms.push({
+        chatroom_id: chatroomRow.chatroom_id,
+        name,
+        type,
+        event_id: chatroomRow.event_id,
+        end_time: endVal || null,
+      });
+    }
+
     const normalizeRoom = (row) => {
       const eventTitle = row.title || row.event_name || row.event_title || row.name || row.eventName;
-      const name = eventTitle || row.chatroom_name || row.room_name || `Chatroom ${row.chatroom_id}`;
+      let name = eventTitle || row.chatroom_name || row.room_name || `Chatroom ${row.chatroom_id}`;
+      if (row.chatroom_id === 1) name = row.name || 'Global Chat';
+      if (row.chatroom_id === 2) name = row.name || 'Help Chat';
       const type = row.type || (row.event_id ? 'event' : 'channel');
       return {
         chatroom_id: row.chatroom_id,
@@ -62,22 +107,9 @@ router.get("/", verifyToken, async (req, res) => {
       };
     };
 
-    const now = new Date();
-    const eventFiltered = (eventRows || []).map((r) => normalizeRoom(r)).filter((r) => {
-      if (!r.event_id) return false;
-      const end = r.end_time;
-      if (!end) return true; // no end info -> treat as upcoming
-      const endDate = parsePossibleDate(end);
-      return !endDate ? true : endDate > now;
-    });
-
-    // include fixed rooms (Global & Help) always
-    const [fixedRows] = await db.query(
-      `SELECT * FROM chatrooms WHERE chatroom_id IN (1,2) ORDER BY chatroom_id`
-    );
     const fixed = (fixedRows || []).map((r) => normalizeRoom(r));
 
-    res.json([ ...fixed, ...eventFiltered ]);
+    res.json([ ...fixed, ...eventChatrooms ]);
   } catch (err) {
     console.error("chatrooms GET error:", err);
     res.status(500).json({ error: "Failed to fetch chatrooms" });
