@@ -48,7 +48,13 @@ router.get("/", verifyToken, async (req, res) => {
       return isNaN(endDate.getTime()) ? true : endDate > now;
     });
 
-    res.json(eventFiltered);
+    // include fixed rooms (Global & Help) always
+    const [fixedRows] = await db.query(
+      `SELECT * FROM chatrooms WHERE chatroom_id IN (1,2) ORDER BY chatroom_id`
+    );
+    const fixed = (fixedRows || []).map((r) => normalizeRoom(r));
+
+    res.json([ ...fixed, ...eventFiltered ]);
   } catch (err) {
     console.error("chatrooms GET error:", err);
     res.status(500).json({ error: "Failed to fetch chatrooms" });
