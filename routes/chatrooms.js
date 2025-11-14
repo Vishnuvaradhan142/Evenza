@@ -28,6 +28,33 @@ const parsePossibleDate = (val) => {
   return isNaN(d.getTime()) ? null : d;
 };
 
+// Try to find a value whose key includes 'end' anywhere in the object (recursively).
+const findEndValueInRow = (obj) => {
+  if (!obj || typeof obj !== 'object') return null;
+  const seen = new Set();
+  const stack = [obj];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (!cur || typeof cur !== 'object' || seen.has(cur)) continue;
+    seen.add(cur);
+    for (const k of Object.keys(cur)) {
+      try {
+        const v = cur[k];
+        if (/end/i.test(k) && v) return v;
+        // if value is an object, dive in
+        if (v && typeof v === 'object') stack.push(v);
+        // if value is a JSON string, attempt parse and dive in
+        if (typeof v === 'string' && v.trim().startsWith('{')) {
+          try { const parsed = JSON.parse(v); if (parsed && typeof parsed === 'object') stack.push(parsed); } catch(e) { }
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+  return null;
+};
+
 /**
  * GET /api/chatrooms
  * Return Global (1), Help (2), then event chatrooms that the user is registered for (status = 'confirmed')
@@ -64,10 +91,23 @@ router.get("/", verifyToken, async (req, res) => {
       if (!eventRow) continue;
 
       // find a sensible end timestamp from the event row
-      const possibleEndKeys = Object.keys(eventRow).filter(k => /end/i.test(k));
       let endVal = null;
+      const possibleEndKeys = Object.keys(eventRow).filter(k => /end/i.test(k));
       for (const k of possibleEndKeys) {
         if (eventRow[k]) { endVal = eventRow[k]; break; }
+      }
+      // if not found directly, try to probe nested JSON/string fields
+      if (!endVal) {
+        const nested = findEndValueInRow(eventRow);
+        if (nested) endVal = nested;
+      }
+
+      // DEBUG: log inspected event end value and parsed date so we can check Render logs
+      try {
+        const parsed = parsePossibleDate(endVal);
+        console.debug && console.debug(`chatrooms: event ${evId} endVal=${String(endVal)} parsed=${parsed ? parsed.toISOString() : 'null'}`);
+      } catch (e) {
+        console.debug && console.debug(`chatrooms: event ${evId} endVal parsing error`);
       }
 
       const endDate = parsePossibleDate(endVal);
