@@ -145,8 +145,8 @@ router.get("/", async (req, res) => {
 
     // Sort by start if available, otherwise by created_at
     out.sort((a, b) => {
-      const aStart = new Date(a.start_time || a.start || a.starts_at || a.startDate || a.created_at || 0).getTime();
-      const bStart = new Date(b.start_time || b.start || b.starts_at || b.startDate || b.created_at || 0).getTime();
+      const aStart = new Date(a.start_time || a.start || a.starts_at || a.startDate || a.event_date || a.eventDate || a.created_at || 0).getTime();
+      const bStart = new Date(b.start_time || b.start || b.starts_at || b.startDate || b.event_date || b.eventDate || b.created_at || 0).getTime();
       return aStart - bStart;
     });
 
@@ -202,10 +202,10 @@ router.get("/user/joined", verifyToken, async (req, res) => {
       registration_status: row.status || row.registration_status || null,
     }));
 
-    // Sort by start_time
+    // Sort by start_time (include event_date fallback)
     out.sort((a, b) => {
-      const aStart = new Date(a.start_time || a.start || a.starts_at || a.startDate || 0).getTime();
-      const bStart = new Date(b.start_time || b.start || b.starts_at || b.startDate || 0).getTime();
+      const aStart = new Date(a.start_time || a.start || a.starts_at || a.startDate || a.event_date || a.eventDate || 0).getTime();
+      const bStart = new Date(b.start_time || b.start || b.starts_at || b.startDate || b.event_date || b.eventDate || 0).getTime();
       return aStart - bStart;
     });
 
@@ -237,19 +237,19 @@ router.get("/user/upcoming", verifyToken, async (req, res) => {
       registration_status: row.status || row.registration_status || null,
     }));
 
-    // Filter upcoming (start >= now) if start field exists
+    // Filter upcoming (start >= now) if start field exists (include event_date fallback)
     const now = new Date();
     out = out.filter(ev => {
-      const start = ev.start_time || ev.start || ev.starts_at || ev.startDate || ev.start_time;
+      const start = ev.start_time || ev.start || ev.starts_at || ev.startDate || ev.event_date || ev.eventDate;
       if (!start) return false; // cannot determine start, exclude
       const s = new Date(start);
       return isNaN(s.getTime()) ? false : s >= now;
     });
 
-    // Sort by start
+    // Sort by start (include event_date fallback)
     out.sort((a, b) => {
-      const aStart = new Date(a.start_time || a.start || a.starts_at || a.startDate || 0).getTime();
-      const bStart = new Date(b.start_time || b.start || b.starts_at || b.startDate || 0).getTime();
+      const aStart = new Date(a.start_time || a.start || a.starts_at || a.startDate || a.event_date || a.eventDate || 0).getTime();
+      const bStart = new Date(b.start_time || b.start || b.starts_at || b.startDate || b.event_date || b.eventDate || 0).getTime();
       return aStart - bStart;
     });
 
@@ -289,7 +289,7 @@ router.get("/stats/upcoming", verifyToken, async (req, res) => {
     );
     const now = new Date();
     const upcomingCount = (rows || []).filter(ev => {
-      const start = ev.start_time || ev.start || ev.starts_at || ev.startDate || ev.start_time;
+      const start = ev.start_time || ev.start || ev.starts_at || ev.startDate || ev.event_date || ev.eventDate;
       if (!start) return false;
       const s = new Date(start);
       return !isNaN(s.getTime()) && s >= now;
