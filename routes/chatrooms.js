@@ -36,25 +36,33 @@ router.get("/", verifyToken, async (req, res) => {
     // Normalize rows: build a consistent `name` field and return only expected props
     const origin = `${req.protocol}://${req.get("host")}`;
     const normalizeRoom = (row) => {
-      const name = row.name || row.chatroom_name || row.title || row.room_name || `Chatroom ${row.chatroom_id}`;
+      // For event chatrooms prefer the event title/name if available
+      const eventTitle = row.title || row.event_name || row.name || row.event_title || row.eventName;
+      // Friendly fallbacks for fixed chatrooms
+      let name = eventTitle || row.chatroom_name || row.room_name || `Chatroom ${row.chatroom_id}`;
+      if (row.chatroom_id === 1) name = row.name || 'Global Chat';
+      if (row.chatroom_id === 2) name = row.name || 'Help Chat';
       const type = row.type || (row.event_id ? 'event' : 'channel');
       return {
         chatroom_id: row.chatroom_id,
         name,
         type,
         event_id: row.event_id,
-        end_time: row.end_time || null,
+        end_time: row.end_time || row.ends_at || row.end || row.event_end || null,
       };
     };
 
-    const fixed = (fixedRows || []).map(normalizeRoom);
+    const fixed = (fixedRows || []).map((r) => normalizeRoom(r));
 
-    const eventFiltered = (eventRows || []).filter((r) => {
-      const end = r.end_time || r.ends_at || r.end || null;
-      if (!end) return true;
+    // Filter: include only event rooms whose events are not completed (end > now) or that have no end info
+    const now = new Date();
+    const eventFiltered = (eventRows || []).map((r) => normalizeRoom(r)).filter((r) => {
+      if (!r.event_id) return false; // not an event room
+      const end = r.end_time;
+      if (!end) return true; // no end info, treat as upcoming
       const endDate = new Date(end);
-      return isNaN(endDate.getTime()) ? true : endDate > new Date();
-    }).map(normalizeRoom);
+      return isNaN(endDate.getTime()) ? true : endDate > now;
+    });
 
     res.json([ ...fixed, ...eventFiltered ]);
   } catch (err) {
