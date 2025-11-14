@@ -13,14 +13,7 @@ const router = express.Router();
 router.get("/", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
-
-    // 1) fixed rooms: Global (1) and Help (2)
-    // Select all columns to avoid referencing DB-specific column names that may differ between MySQL/Postgres
-    const [fixedRows] = await db.query(
-      `SELECT * FROM chatrooms WHERE chatroom_id IN (1,2) ORDER BY chatroom_id`
-    );
-
-    // 2) event rooms where the user has a confirmed registration AND event is NOT completed
+    // Return only event chatrooms the user is registered for (confirmed) and that are not completed.
     const [eventRows] = await db.query(
       `SELECT DISTINCT c.*, e.*
        FROM chatrooms c
@@ -32,16 +25,10 @@ router.get("/", verifyToken, async (req, res) => {
       [userId]
     );
 
-    // Filter out chatrooms whose events have completed (do in JS to avoid SQL errors if end_time missing)
-    // Normalize rows: build a consistent `name` field and return only expected props
-    const origin = `${req.protocol}://${req.get("host")}`;
+    // Normalize rows: prefer event title for name and compute end_time fallbacks
     const normalizeRoom = (row) => {
-      // For event chatrooms prefer the event title/name if available
-      const eventTitle = row.title || row.event_name || row.name || row.event_title || row.eventName;
-      // Friendly fallbacks for fixed chatrooms
-      let name = eventTitle || row.chatroom_name || row.room_name || `Chatroom ${row.chatroom_id}`;
-      if (row.chatroom_id === 1) name = row.name || 'Global Chat';
-      if (row.chatroom_id === 2) name = row.name || 'Help Chat';
+      const eventTitle = row.title || row.event_name || row.event_title || row.name || row.eventName;
+      const name = eventTitle || row.chatroom_name || row.room_name || `Chatroom ${row.chatroom_id}`;
       const type = row.type || (row.event_id ? 'event' : 'channel');
       return {
         chatroom_id: row.chatroom_id,
@@ -52,19 +39,16 @@ router.get("/", verifyToken, async (req, res) => {
       };
     };
 
-    const fixed = (fixedRows || []).map((r) => normalizeRoom(r));
-
-    // Filter: include only event rooms whose events are not completed (end > now) or that have no end info
     const now = new Date();
     const eventFiltered = (eventRows || []).map((r) => normalizeRoom(r)).filter((r) => {
-      if (!r.event_id) return false; // not an event room
+      if (!r.event_id) return false;
       const end = r.end_time;
-      if (!end) return true; // no end info, treat as upcoming
+      if (!end) return true; // no end info -> treat as upcoming
       const endDate = new Date(end);
       return isNaN(endDate.getTime()) ? true : endDate > now;
     });
 
-    res.json([ ...fixed, ...eventFiltered ]);
+    res.json(eventFiltered);
   } catch (err) {
     console.error("chatrooms GET error:", err);
     res.status(500).json({ error: "Failed to fetch chatrooms" });
