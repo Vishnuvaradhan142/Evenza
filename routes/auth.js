@@ -143,15 +143,25 @@ router.get("/me", verifyToken, async (req, res) => {
     }
 
     const userId = req.user.user_id;
+    // Select full user row and normalize fields in JS to avoid selecting missing columns like `status`
     const [rows] = await db.query(
-      "SELECT user_id, username, email, role, status, last_seen FROM users WHERE user_id = ?",
+      "SELECT u.* FROM users u WHERE u.user_id = ?",
       [userId]
     );
 
     if (rows.length === 0)
       return res.status(404).json({ message: "User not found" });
 
-    return res.json(rows[0]);
+    const u = rows[0];
+    const out = {
+      user_id: u.user_id,
+      username: u.username,
+      email: u.email,
+      role: u.role,
+      status: u.status ?? u.user_status ?? null,
+      last_seen: u.last_seen ?? u.lastSeen ?? null,
+    };
+    return res.json(out);
   } catch (err) {
     console.error("Fetch /me error:", err);
     return res.status(500).json({ message: "Failed to fetch user" });
