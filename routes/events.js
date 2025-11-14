@@ -186,17 +186,20 @@ router.get("/user/joined", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
     const locSql = await getLocationSQL();
+    // Select registration row generically (avoid referencing schema-specific column names)
     const [rows] = await db.execute(
-      `SELECT e.*, ${locSql}, r.registered_at AS registration_date, r.status AS registration_status
+      `SELECT e.*, r.*
        FROM events e JOIN registrations r ON e.event_id = r.event_id
        WHERE r.user_id = ?`,
       [userId]
     );
     const origin = `${req.protocol}://${req.get("host")}`;
-    let out = (rows || []).map(r => ({
-      ...r,
-      ...normalizeImagePath(r, origin),
-      category: r.category || r.category_name || "General",
+    let out = (rows || []).map(row => ({
+      ...row,
+      ...normalizeImagePath(row, origin),
+      category: row.category || row.category_name || "General",
+      registration_date: row.registered_at || row.registration_time || row.created_at || row.registrationDate || null,
+      registration_status: row.status || row.registration_status || null,
     }));
 
     // Sort by start_time
@@ -218,17 +221,20 @@ router.get("/user/upcoming", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
     const locSql = await getLocationSQL();
+    // Avoid selecting non-existent registration timestamp columns in SQL
     const [rows] = await db.execute(
-      `SELECT e.*, ${locSql}, r.registered_at AS registration_date, r.status AS registration_status
+      `SELECT e.*, r.*
        FROM events e JOIN registrations r ON e.event_id = r.event_id
        WHERE r.user_id = ?`,
       [userId]
     );
     const origin = `${req.protocol}://${req.get("host")}`;
-    let out = (rows || []).map(r => ({
-      ...r,
-      ...normalizeImagePath(r, origin),
-      category: r.category || r.category_name || "General",
+    let out = (rows || []).map(row => ({
+      ...row,
+      ...normalizeImagePath(row, origin),
+      category: row.category || row.category_name || "General",
+      registration_date: row.registered_at || row.registration_time || row.created_at || row.registrationDate || null,
+      registration_status: row.status || row.registration_status || null,
     }));
 
     // Filter upcoming (start >= now) if start field exists
@@ -274,8 +280,9 @@ router.get("/stats/upcoming", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
     // Fetch registrations and compute upcoming count in JS to avoid referencing missing columns in SQL
+    // Avoid selecting schema-specific timestamp column names in SQL
     const [rows] = await db.execute(
-      `SELECT e.*, r.registered_at AS registration_date
+      `SELECT e.*, r.*
        FROM registrations r JOIN events e ON r.event_id = e.event_id
        WHERE r.user_id = ?`,
       [userId]

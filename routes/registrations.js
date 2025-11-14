@@ -34,12 +34,24 @@ router.get("/my-waitlist", verifyToken, async (req, res) => {
          AND n.event_id = e.event_id 
          AND n.type = 'in-app'
        WHERE r.user_id = ? 
-         AND TRIM(LOWER(r.status)) = 'pending'
-       ORDER BY e.start_time ASC`,
+         AND TRIM(LOWER(r.status)) = 'pending'`,
       [userId]
     );
 
-    res.json(rows);
+    // Normalize and sort by start (if available) in JS to avoid SQL schema differences
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const normalized = (rows || []).map((r) => ({
+      ...r,
+      start: r.start_time || r.start || r.starts_at || r.startDate || null,
+    }));
+
+    normalized.sort((a, b) => {
+      const aStart = new Date(a.start || a.start_time || a.starts_at || 0).getTime();
+      const bStart = new Date(b.start || b.start_time || b.starts_at || 0).getTime();
+      return aStart - bStart;
+    });
+
+    res.json(normalized);
   } catch (err) {
     console.error("Error fetching waitlisted events:", err);
     res.status(500).json({ message: "Error fetching waitlisted events" });
@@ -244,8 +256,7 @@ router.get('/by-event/:eventId', verifyToken, async (req, res) => {
       `SELECT r.*, u.*
        FROM registrations r
        LEFT JOIN users u ON r.user_id = u.user_id
-       WHERE r.event_id = ?
-       ORDER BY r.registered_at ASC`,
+       WHERE r.event_id = ?`,
       [eventId]
     );
 
@@ -280,6 +291,13 @@ router.get('/by-event/:eventId', verifyToken, async (req, res) => {
       };
     });
 
+    // Sort registrations by registration timestamp in JS if present
+    normalized.sort((a, b) => {
+      const aReg = new Date(a.registered_at || a.registration_time || a.created_at || 0).getTime();
+      const bReg = new Date(b.registered_at || b.registration_time || b.created_at || 0).getTime();
+      return aReg - bReg;
+    });
+
     res.json({ event: { event_id: ev.event_id, title: ev.title }, registrations: normalized });
   } catch (err) {
     console.error('Error fetching registrations by event:', err);
@@ -303,8 +321,7 @@ router.get('/mine', verifyToken, async (req, res) => {
        FROM registrations r
        JOIN events e ON r.event_id = e.event_id
        LEFT JOIN users u ON r.user_id = u.user_id
-       WHERE e.created_by = ?
-       ORDER BY e.event_id ASC, r.registered_at ASC`,
+       WHERE e.created_by = ?`,
       [userId]
     );
 
@@ -336,6 +353,14 @@ router.get('/mine', verifyToken, async (req, res) => {
     }
 
     const events = Array.from(eventsMap.values());
+    // Sort registrations per event by registration timestamp if available
+    for (const ev of events) {
+      ev.registrations.sort((a, b) => {
+        const aReg = new Date(a.registered_at || a.registration_time || a.created_at || 0).getTime();
+        const bReg = new Date(b.registered_at || b.registration_time || b.created_at || 0).getTime();
+        return aReg - bReg;
+      });
+    }
     res.json({ events });
   } catch (err) {
     console.error('Error fetching registrations for owner:', err);
