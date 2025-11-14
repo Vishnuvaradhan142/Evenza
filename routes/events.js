@@ -6,24 +6,37 @@ import { verifyToken } from "../middleware/authMiddleware.js";
 const router = express.Router();
 const isPostgres = !!process.env.DATABASE_URL;
 
-// Build DB-specific location extraction
-const getLocationSQL = () => {
-  if (isPostgres) {
-    return `COALESCE(
-      NULLIF(CONCAT_WS(' - ', e.locations->0->>'name', e.locations->0->>'address'), ''),
-      e.locations->0::text,
-      NULL
-    ) AS location`;
+// Build DB-specific location extraction.
+// Resolve at runtime whether the events table has a JSON `locations` column or a simple `location` column.
+let _cachedLocationSQL = null;
+async function getLocationSQL() {
+  if (_cachedLocationSQL !== null) return _cachedLocationSQL;
+
+  try {
+    // Check information_schema for 'locations' column on 'events'
+    const [cols] = await db.query(
+      "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'events' AND column_name = 'locations'",
+      []
+    );
+    const hasLocations = Array.isArray(cols) && cols.length > 0;
+
+    if (hasLocations) {
+      if (isPostgres) {
+        _cachedLocationSQL = `COALESCE(NULLIF(CONCAT_WS(' - ', e.locations->0->>'name', e.locations->0->>'address'), ''), e.locations->0::text, NULL) AS location`;
+      } else {
+        _cachedLocationSQL = `COALESCE(NULLIF(CONCAT_WS(' -', JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')), JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))), ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''), NULL) AS location`;
+      }
+    } else {
+      // Fallback to a simple 'location' column
+      _cachedLocationSQL = `COALESCE(NULLIF(e.location, ''), NULL) AS location`;
+    }
+  } catch (err) {
+    console.warn('Could not determine locations column presence, defaulting to e.location:', err && err.message);
+    _cachedLocationSQL = `COALESCE(NULLIF(e.location, ''), NULL) AS location`;
   }
-  return `COALESCE(
-    NULLIF(CONCAT_WS(' -',
-      JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].name')),
-      JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0].address'))
-    ), ''),
-    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.locations, '$[0]')), ''),
-    NULL
-  ) AS location`;
-};
+
+  return _cachedLocationSQL;
+}
 
 // Small helper to normalize image URLs consistently
 function normalizeImagePath(row, origin) {
@@ -40,8 +53,9 @@ function normalizeImagePath(row, origin) {
 router.get("/mine", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
+    const locSql = await getLocationSQL();
     const [rows] = await db.execute(
-      `SELECT e.event_id, e.title, e.start_time, e.end_time, ${getLocationSQL()}, e.image AS image_path
+      `SELECT e.event_id, e.title, e.start_time, e.end_time, ${locSql}, e.image AS image_path
        FROM events e WHERE e.created_by = ? ORDER BY e.start_time DESC`,
       [userId]
     );
@@ -61,7 +75,8 @@ router.get("/mine", verifyToken, async (req, res) => {
 // GET /all - all events (no filters), admin/owner views
 router.get("/all", async (req, res) => {
   try {
-    const sql = `SELECT e.*, ${getLocationSQL()} FROM events e ORDER BY e.created_at DESC`;
+    const locSql = await getLocationSQL();
+    const sql = `SELECT e.*, ${locSql} FROM events e ORDER BY e.created_at DESC`;
     const [rows] = await db.execute(sql);
     const origin = `${req.protocol}://${req.get("host")}`;
     const out = (rows || []).map(r => ({
@@ -80,8 +95,9 @@ router.get("/all", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const q = (req.query.q || "").toString().trim().toLowerCase();
+    const locSql = await getLocationSQL();
     const [rows] = await db.execute(
-      `SELECT e.*, ${getLocationSQL()} FROM events e WHERE e.end_time >= NOW() ORDER BY e.start_time ASC`
+      `SELECT e.*, ${locSql} FROM events e WHERE e.end_time >= NOW() ORDER BY e.start_time ASC`
     );
     const origin = `${req.protocol}://${req.get("host")}`;
     let out = (rows || []).map(r => ({
@@ -107,8 +123,9 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const eventId = req.params.id;
+    const locSql = await getLocationSQL();
     const [rows] = await db.execute(
-      `SELECT e.*, ${getLocationSQL()} FROM events e WHERE e.event_id = ?`,
+      `SELECT e.*, ${locSql} FROM events e WHERE e.event_id = ?`,
       [eventId]
     );
     if (!rows || !rows[0]) return res.status(404).json({ message: "Event not found" });
@@ -130,8 +147,9 @@ router.get("/:id", async (req, res) => {
 router.get("/user/joined", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
+    const locSql = await getLocationSQL();
     const [rows] = await db.execute(
-      `SELECT e.*, ${getLocationSQL()}, r.registered_at AS registration_date, r.status AS registration_status
+      `SELECT e.*, ${locSql}, r.registered_at AS registration_date, r.status AS registration_status
        FROM events e JOIN registrations r ON e.event_id = r.event_id
        WHERE r.user_id = ? ORDER BY e.start_time ASC`,
       [userId]
@@ -153,8 +171,9 @@ router.get("/user/joined", verifyToken, async (req, res) => {
 router.get("/user/upcoming", verifyToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
+    const locSql = await getLocationSQL();
     const [rows] = await db.execute(
-      `SELECT e.*, ${getLocationSQL()}, r.registered_at AS registration_date, r.status AS registration_status
+      `SELECT e.*, ${locSql}, r.registered_at AS registration_date, r.status AS registration_status
        FROM events e JOIN registrations r ON e.event_id = r.event_id
        WHERE r.user_id = ? AND e.start_time >= NOW()
        ORDER BY e.start_time ASC`,
