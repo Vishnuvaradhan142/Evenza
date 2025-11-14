@@ -5,6 +5,29 @@ import { verifyToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
+// Helper: parse various possible timestamp formats into a Date or null.
+// - Accepts Date, ISO strings, numeric strings, numeric seconds or milliseconds.
+// - If value looks like seconds (<= 1e12) treat as seconds and multiply by 1000.
+const parsePossibleDate = (val) => {
+  if (!val && val !== 0) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+  // handle numeric-like strings
+  if (typeof val === 'string' && /^\d+$/.test(val)) {
+    const n = Number(val);
+    const ms = n > 1e12 ? n : n * 1000;
+    const d = new Date(ms);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof val === 'number') {
+    const ms = val > 1e12 ? val : val * 1000;
+    const d = new Date(ms);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  // fallback: let Date try to parse (handles ISO, postgres timestamptz, etc.)
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+};
+
 /**
  * GET /api/chatrooms
  * Return Global (1), Help (2), then event chatrooms that the user is registered for (status = 'confirmed')
@@ -44,8 +67,8 @@ router.get("/", verifyToken, async (req, res) => {
       if (!r.event_id) return false;
       const end = r.end_time;
       if (!end) return true; // no end info -> treat as upcoming
-      const endDate = new Date(end);
-      return isNaN(endDate.getTime()) ? true : endDate > now;
+      const endDate = parsePossibleDate(end);
+      return !endDate ? true : endDate > now;
     });
 
     // include fixed rooms (Global & Help) always
@@ -85,7 +108,10 @@ router.get("/admin/mine", verifyToken, async (req, res) => {
     for (const ev of ownedEvents || []) {
       // skip events that are already completed (JS check)
       const end = ev.end_time || ev.ends_at || ev.end || null;
-      if (end && !isNaN(new Date(end).getTime()) && new Date(end) <= new Date()) continue;
+      if (end) {
+        const parsed = parsePossibleDate(end);
+        if (parsed && parsed <= new Date()) continue;
+      }
       // find chatroom for this event
       const [[existing]] = await db.query(
         `SELECT * FROM chatrooms WHERE event_id = ? LIMIT 1`,
@@ -166,8 +192,8 @@ router.get("/owner/all", verifyToken, async (req, res) => {
       if (!r.event_id) return false;
       const end = r.end_time;
       if (!end) return true;
-      const endDate = new Date(end);
-      return isNaN(endDate.getTime()) ? true : endDate > now;
+      const endDate = parsePossibleDate(end);
+      return !endDate ? true : endDate > now;
     });
 
     res.json([ ...fixed, ...eventFiltered ]);
@@ -224,8 +250,11 @@ router.get("/:chatroom_id/messages", verifyToken, async (req, res) => {
       }
 
       // ensure event not completed (skip check for owner to allow monitoring)
-      if (!isOwner && chatroom.end_time && new Date(chatroom.end_time) <= new Date()) {
-        return res.status(403).json({ error: "Event has ended; chat is closed" });
+      if (!isOwner && chatroom.end_time) {
+        const parsedEnd = parsePossibleDate(chatroom.end_time);
+        if (parsedEnd && parsedEnd <= new Date()) {
+          return res.status(403).json({ error: "Event has ended; chat is closed" });
+        }
       }
     }
 
@@ -293,8 +322,11 @@ router.post("/:chatroom_id/messages", verifyToken, async (req, res) => {
       }
 
       // ensure event not completed (skip check for owner)
-      if (!isOwner && chatroom.end_time && new Date(chatroom.end_time) <= new Date()) {
-        return res.status(403).json({ error: "Event has ended; chat is closed" });
+      if (!isOwner && chatroom.end_time) {
+        const parsedEnd = parsePossibleDate(chatroom.end_time);
+        if (parsedEnd && parsedEnd <= new Date()) {
+          return res.status(403).json({ error: "Event has ended; chat is closed" });
+        }
       }
     }
 
