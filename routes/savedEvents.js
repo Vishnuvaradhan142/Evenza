@@ -43,7 +43,6 @@ router.get("/my", verifyToken, async (req, res) => {
     const [rows] = await db.execute(
       `SELECT s.*, e.* FROM saved_events s
        JOIN events e ON s.event_id = e.event_id
-       LEFT JOIN categories c ON e.category_id = c.category_id
        WHERE s.user_id = ?`,
       [userId]
     );
