@@ -22,8 +22,8 @@ router.get("/user", verifyToken, async (req, res) => {
     // Normalize and sort client-side (created_at may be named differently across DBs)
     const out = (rows || []).map((r) => ({
       ...r,
-      event_id: r.event_id ?? r.eventId ?? r.event || null,
-      created_at: r.created_at ?? r.createdAt ?? r.created || null,
+      event_id: (r.event_id ?? r.eventId ?? r.event) || null,
+      created_at: (r.created_at ?? r.createdAt ?? r.created) || null,
       sent_at: r.sent_at ?? r.sentAt ?? null,
     }));
 
@@ -78,8 +78,8 @@ router.get("/owner", verifyToken, async (req, res) => {
     const [rows] = await db.execute(sql, params);
     const out = (rows || []).map((r) => ({
       ...r,
-      event_id: r.event_id ?? r.eventId ?? r.event || null,
-      created_at: r.created_at ?? r.createdAt ?? r.created || null,
+      event_id: (r.event_id ?? r.eventId ?? r.event) || null,
+      created_at: (r.created_at ?? r.createdAt ?? r.created) || null,
       sent_at: r.sent_at ?? r.sentAt ?? null,
     }));
 
