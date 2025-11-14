@@ -163,12 +163,17 @@ router.get("/:chatroom_id/messages", verifyToken, async (req, res) => {
 
     // fetch chatroom and related event end_time (if any)
     const [[chatroom]] = await db.query(
-      `SELECT c.chatroom_id, c.type, c.event_id, e.*
+      `SELECT c.chatroom_id, c.event_id, e.*
        FROM chatrooms c
        LEFT JOIN events e ON e.event_id = c.event_id
        WHERE c.chatroom_id = ? LIMIT 1`,
       [chatroomId]
     );
+
+    // Derive a stable `type` field if the DB doesn't have it
+    if (chatroom && !chatroom.type) {
+      chatroom.type = chatroom.event_id ? 'event' : 'channel';
+    }
 
     if (!chatroom) return res.status(404).json({ error: "Chatroom not found" });
 
@@ -228,12 +233,16 @@ router.post("/:chatroom_id/messages", verifyToken, async (req, res) => {
     }
 
     const [[chatroom]] = await db.query(
-      `SELECT c.chatroom_id, c.type, c.event_id, e.*
+      `SELECT c.chatroom_id, c.event_id, e.*
        FROM chatrooms c
        LEFT JOIN events e ON e.event_id = c.event_id
        WHERE c.chatroom_id = ? LIMIT 1`,
       [chatroomId]
     );
+
+    if (chatroom && !chatroom.type) {
+      chatroom.type = chatroom.event_id ? 'event' : 'channel';
+    }
 
     if (!chatroom) return res.status(404).json({ error: "Chatroom not found" });
 
