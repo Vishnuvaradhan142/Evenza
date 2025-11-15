@@ -106,6 +106,47 @@ async function ensureSchema() {
   } catch (e) {
     console.warn("Could not ensure announcements table:", e.message);
   }
+
+    // Ensure ratings_reviews table exists (for storing user reviews)
+    try {
+      const [rr] = await db.query(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ratings_reviews'",
+        []
+      );
+      if (!Array.isArray(rr) || rr.length === 0) {
+        console.log("Creating 'ratings_reviews' table...");
+        if (process.env.DATABASE_URL) {
+          // PostgreSQL
+          await db.query(`
+            CREATE TABLE IF NOT EXISTS ratings_reviews (
+              review_id SERIAL PRIMARY KEY,
+              user_id INTEGER NOT NULL,
+              event_id INTEGER NOT NULL,
+              rating SMALLINT,
+              review TEXT,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              UNIQUE (user_id, event_id)
+            )
+          `, []);
+        } else {
+          // MySQL
+          await db.query(`
+            CREATE TABLE IF NOT EXISTS ratings_reviews (
+              review_id INT AUTO_INCREMENT PRIMARY KEY,
+              user_id INT NOT NULL,
+              event_id INT NOT NULL,
+              rating TINYINT,
+              review TEXT,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE KEY uq_user_event (user_id, event_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+          `, []);
+        }
+        console.log("✅ Created 'ratings_reviews' table");
+      }
+    } catch (e) {
+      console.warn('Could not ensure ratings_reviews table:', e.message);
+    }
 }
 await ensureSchema();
 

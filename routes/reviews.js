@@ -89,13 +89,24 @@ router.post("/", verifyToken, async (req, res) => {
     }
 
     // Upsert (Insert or update existing)
-    // MySQL: use INSERT ... ON DUPLICATE KEY UPDATE (we created unique key on user_id,event_id)
-    const insertSql = `
-      INSERT INTO ratings_reviews (user_id, event_id, rating, review)
-      VALUES (?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE rating = VALUES(rating), review = VALUES(review), created_at = CURRENT_TIMESTAMP
-    `;
-    await db.query(insertSql, [userId, event_id, rating, review || null]);
+    // Support both MySQL (ON DUPLICATE KEY) and PostgreSQL (ON CONFLICT)
+    if (process.env.DATABASE_URL) {
+      // PostgreSQL
+      const pgUpsert = `
+        INSERT INTO ratings_reviews (user_id, event_id, rating, review, created_at)
+        VALUES (?, ?, ?, ?, NOW())
+        ON CONFLICT (user_id, event_id) DO UPDATE SET rating = EXCLUDED.rating, review = EXCLUDED.review, created_at = NOW()
+      `;
+      await db.query(pgUpsert, [userId, event_id, rating, review || null]);
+    } else {
+      // MySQL
+      const myUpsert = `
+        INSERT INTO ratings_reviews (user_id, event_id, rating, review)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE rating = VALUES(rating), review = VALUES(review), created_at = CURRENT_TIMESTAMP
+      `;
+      await db.query(myUpsert, [userId, event_id, rating, review || null]);
+    }
 
     res.json({ message: "Rating submitted" });
   } catch (err) {
@@ -137,6 +148,32 @@ router.get("/admin", async (req, res) => {
   } catch (err) {
     console.error('GET /api/reviews/admin error:', err);
     res.status(500).json({ message: 'Failed to fetch reviews', error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/reviews/:event_id
+ * Deletes the logged-in user's review for the given event
+ */
+router.delete("/:event_id", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user?.user_id || req.user?.id;
+    if (!userId) return res.status(400).json({ message: "User id missing from token" });
+
+    const eventId = req.params.event_id;
+    if (!eventId) return res.status(400).json({ message: "event_id is required" });
+
+    // Delete only if the review belongs to the user
+    console.debug('DELETE /api/reviews request', { userId, eventId });
+    const deleteSql = `DELETE FROM ratings_reviews WHERE user_id = ? AND event_id = ?`;
+    const result = await db.query(deleteSql, [userId, eventId]);
+    console.debug('DELETE /api/reviews db result:', result);
+
+    // Informative response for debugging: if nothing deleted, still return 200 but include info
+    res.json({ message: 'Review deleted', debug: { dbResult: Array.isArray(result) ? result[0] : result } });
+  } catch (err) {
+    console.error('DELETE /api/reviews/:event_id error:', err);
+    res.status(500).json({ message: 'Failed to delete review', error: err.message });
   }
 });
 

@@ -6,6 +6,44 @@ import { verifyToken } from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 /**
+ * Get tickets for a specific event
+ * Public endpoint used by the frontend event details modal
+ */
+router.get("/event/:event_id", async (req, res) => {
+  try {
+    const { event_id } = req.params;
+    const [rows] = await db.execute(
+      `SELECT t.* FROM tickets t WHERE t.event_id = ?`,
+      [event_id]
+    );
+
+    const out = (rows || []).map((r) => ({
+      ticket_id: r.ticket_id,
+      ticket_type: r.ticket_type || r.type || "General",
+      price: r.price ?? r.amount ?? 0,
+      description: r.description || r.ticket_description || null,
+      quantity_total: r.quantity_total ?? r.total_quantity ?? null,
+      quantity_available: r.quantity_available ?? r.available ?? null,
+      event_id: r.event_id,
+    }));
+
+    res.json(out);
+  } catch (err) {
+    // If the tickets table/schema doesn't match (e.g. migrated DB without tickets/event_id),
+    // don't fail the browse/event flow — return an empty tickets array and warn.
+    console.warn("Warning: tickets query failed for event; returning empty list.", err && err.code ? err.code : err);
+    // If it's a field/column error, return an empty array so the frontend can continue.
+    if (err && (err.code === 'ER_BAD_FIELD_ERROR' || (err.sqlMessage && err.sqlMessage.includes('Unknown column')))) {
+      return res.json([]);
+    }
+
+    // For other errors, log and return empty list to avoid breaking the UI.
+    console.error("Error fetching tickets for event:", err);
+    return res.json([]);
+  }
+});
+
+/**
  * Get all **upcoming / active tickets** for the logged-in user
  * (filters out tickets where event is already completed)
  */

@@ -76,7 +76,7 @@ router.get("/mine", verifyToken, async (req, res) => {
     let out = (rows || []).map(r => ({
       ...r,
       ...normalizeImagePath(r, origin),
-      category: r.category || r.category_name || "General",
+      category: r.category ?? r.category_name ?? r.category_id ?? r.categoryName ?? "General",
     }));
 
     // Sort by start_time if present
@@ -103,7 +103,7 @@ router.get("/all", async (req, res) => {
     const out = (rows || []).map(r => ({
       ...r,
       ...normalizeImagePath(r, origin),
-      category: r.category || r.category_name || "General",
+      category: r.category ?? r.category_name ?? r.category_id ?? r.categoryName ?? "General",
     }));
     res.json(out);
   } catch (err) {
@@ -142,6 +142,14 @@ router.get("/", async (req, res) => {
       const endDate = new Date(end);
       return isNaN(endDate.getTime()) ? true : endDate >= now;
     });
+
+    // Debug: log category distribution to help frontend mapping
+    try {
+      const cats = Array.from(new Set(out.map(o => o.category).filter(Boolean)));
+      console.log('events.js: returning events categories =>', cats.slice(0, 20));
+    } catch (e) {
+      console.warn('events.js: could not compute categories debug', e && e.message);
+    }
 
     // Sort by start if available, otherwise by created_at
     out.sort((a, b) => {
@@ -197,7 +205,7 @@ router.get("/user/joined", verifyToken, async (req, res) => {
     let out = (rows || []).map(row => ({
       ...row,
       ...normalizeImagePath(row, origin),
-      category: row.category || row.category_name || "General",
+      category: row.category ?? row.category_name ?? row.category_id ?? row.categoryName ?? "General",
       registration_date: row.registered_at || row.registration_time || row.created_at || row.registrationDate || null,
       registration_status: row.status || row.registration_status || null,
     }));
@@ -232,7 +240,7 @@ router.get("/user/upcoming", verifyToken, async (req, res) => {
     let out = (rows || []).map(row => ({
       ...row,
       ...normalizeImagePath(row, origin),
-      category: row.category || row.category_name || "General",
+      category: row.category ?? row.category_name ?? row.category_id ?? row.categoryName ?? "General",
       registration_date: row.registered_at || row.registration_time || row.created_at || row.registrationDate || null,
       registration_status: row.status || row.registration_status || null,
     }));
